@@ -82,7 +82,17 @@ class Kit:
         bpy.ops.object.modifier_apply(modifier=mod.name)
 
     def _check(self, o):
-        if not isinstance(o, bpy.types.Object) or o not in self.made:
+        if isinstance(o, (list, tuple)):
+            raise KitError("expected one piece, got a list: kit.join(*pieces) first")
+        try:
+            known = isinstance(o, bpy.types.Object) and o in self.made
+            o.name if known else None
+        except ReferenceError:
+            known = False
+        if not known:
+            if isinstance(o, bpy.types.Object):
+                raise KitError("that piece was already used up: a cutter is consumed by cut, and join/union/mirror/array "
+                               "merge pieces into the first one (use the returned piece)")
             raise KitError("expected a piece the kit made, got %r" % (o,))
         return o
 
@@ -201,6 +211,8 @@ class Kit:
         self._check(target)
         for k, c in enumerate(cutters):
             self._check(c)
+            if c is target:
+                raise KitError("cut number %d is the target itself: a piece cannot cut itself (make a separate cutter)" % (k + 1))
             before_mesh = target.data.copy()
             vol0, _f0 = self._extent(target)
             m = target.modifiers.new("cut", "BOOLEAN")
@@ -230,6 +242,8 @@ class Kit:
         self._check(target)
         for o in others:
             self._check(o)
+            if o is target:
+                continue                          # union with itself changes nothing
             m = target.modifiers.new("union", "BOOLEAN")
             m.operation = "UNION"
             m.solver = "EXACT"

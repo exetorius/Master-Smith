@@ -246,3 +246,17 @@ def test_fit_score_prefers_the_build_that_matches_the_picture():
         g = fit_score(os.path.join(d, "side.png"), box, os.path.join(d, "good.png"))
         b = fit_score(os.path.join(d, "side.png"), box, os.path.join(d, "broken.png"))
         assert g > 0.95 and b < 0.5
+
+
+@BLENDER
+def test_kit_mistakes_come_back_as_readable_errors():
+    with tempfile.TemporaryDirectory() as d:
+        for name, code, words in (
+                ("SelfCut", "def build(kit, L, W, H):\n    b = kit.box()\n    return kit.cut(b, b)", "cannot cut itself"),
+                ("UsedUp", "def build(kit, L, W, H):\n    b = kit.box()\n    c = kit.box((0, 0, 0), (L / 4, W * 2, H / 4))\n"
+                           "    kit.cut(b, c)\n    return kit.cut(b, c)", "already used up")):
+            a = os.path.join(d, name + ".json")
+            json.dump({"name": name, "code": code, "size": [0.1, 0.05, 0.05], "out_dir": os.path.join(d, "parts")}, open(a, "w"))
+            _blender("build_part.py", a)
+            res = json.load(open(os.path.join(d, "parts", name + ".json")))
+            assert not res["ok"] and words in res["error"], res.get("error")
