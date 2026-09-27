@@ -8,6 +8,9 @@ from ..quality import requested_parts
 PROMPT = """You are reviewing a finished game asset. Judge what the delivered renders actually show.
 Brief and requested changes: {brief}
 Images in order: {images}
+The brief says where the reference came from. When it is the customer's own photograph, judge colours and materials
+against the PHOTOGRAPH: the caption is the director's wording of it and can be wrong about a part's colour (a grey
+magazine described as black is not a defect of the model).
 The original reference may NOT contain newly requested parts. Judge those against their written requirements.
 When a SOURCE SEED preview is supplied, compare it with the finished model. If the source looks clean but the finish
 has triangle/faceted patterns, report a finishing regression, not a need for a new mesh vendor. Lighting/view may differ.
@@ -59,6 +62,7 @@ def review(job, reference_path, renders, report=None):
                 labels.append(label)
     requested = requested_parts(job.spec)
     brief = {"description": job.spec.description, "notes": job.spec.notes,
+             "reference_source": "the customer's own photograph" if job.spec.reference_images else "a generated concept picture",
              "edit_instructions": job.spec.edit_instructions, "requested_parts": requested,
              "remove_parts": job.spec.remove_parts, "texture_fixes": job.spec.texture_fixes}
     if not any(label.startswith("delivered") for label in labels):

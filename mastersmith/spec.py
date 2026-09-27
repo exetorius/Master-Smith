@@ -7,6 +7,14 @@ STYLES = ("realistic", "stylized")
 
 # Scripted texture repairs the finish can apply on a re-finish of the same seed (no vendor, no spend). The director
 # reaches for these before any repaint or new mesh when the complaint is about the texture, not the shape.
+def weapon_has_glass(description):
+    """True when the caption describes an optic, lens or light on the weapon, ignoring negated mentions ("no scope")."""
+    import re
+    text = re.sub(r"\b(no|without|never)(\s+an?|\s+any)?\s+(scope|optic|optics|sight|sights|lens|laser|light|flashlight)s?\b",
+                  " ", (description or "").lower())
+    return re.search(r"\b(scope|optic|optics|red[ -]dot|holograph\w*|reflex sight|lens|laser|flashlight|weapon light)\b", text) is not None
+
+
 TEXTURE_FIXES = {
     "smooth_organic_normals": "opt-in shading-normal repair for a continuous organic mesh: smooth shared-vertex normals on source and LODs before baking; removes intentional hard edges too, so do not use on mechanical parts or mixed assemblies",
     "preserve_seed_maps": "preserve the original seed normal/AO and skip reference projection; repair finishing-induced artifacts without buying a mesh",
@@ -44,7 +52,7 @@ class Spec:
     research: object = None           # None -> search the web for a photo when search_query names a real thing
     search_query: str = ""            # the real-world name to look up pictures for; empty for fictional/generic objects
     multiview: object = None          # None -> by category (weapons and vehicles yes); True/False to force
-    premium: bool = False             # dearer picture model and director for hard briefs
+    premium: bool = False             # dearer picture model for hard briefs; pictures only (no part seeds, 2026-09-25)
     glass: object = None              # None -> by category (vehicles, weapons, environments yes); mark glass faces
     cockpit: object = None            # None -> aircraft and helicopters get a cockpit built under the canopy
     rig: object = None                # None -> by category (characters yes; weapons/vehicles when asked); rig the asset
@@ -54,7 +62,7 @@ class Spec:
     retexture: bool = False           # a refine that changes only colours/materials: repaint the existing mesh, keep its shape
     retexture_parts: list = None      # ...and only these named parts of it ("stock", "slide"); empty = the whole object
     protect_parts: list = None        # neighbouring parts a repaint must leave alone ("the translucent amber magazine")
-    part_seeds: object = None         # None -> premium/hero hard-surface builds seed small attached parts separately (issue #5)
+    part_seeds: object = None         # None -> hero hard-surface builds (150k+ tris) seed small attached parts separately (issue #5)
     repaint: str = None               # with hybrid: "meshy" (retexture vendor) or "pictures" (renders repainted and baked); None -> config
     hybrid: object = None             # True -> Meshy v7 geometry + a retexture pass on our unwrap (clean albedo); None -> config default
     seed_vendor: str = None           # None -> Tripo H3.1; "meshy7mv" (Meshy v7 multi-image, ~$0.035, 3x slower),
@@ -101,7 +109,10 @@ class Spec:
             self.multiview = True
         self.multiview = bool(self.multiview)
         if self.glass is None:
-            self.glass = self.category in ("vehicle", "aircraft", "helicopter", "weapon", "environment")
+            # a weapon has glass only when an optic or lens is described: "scope lens glass" masks found 1,000 faces on
+            # a bullpup with no scope and the glass slot then blocked the detail bake (2026-09-25)
+            self.glass = self.category in ("vehicle", "aircraft", "helicopter", "environment") or (
+                self.category == "weapon" and weapon_has_glass(self.description))
         self.glass = bool(self.glass)
         if self.rig is None:
             self.rig = self.category == "character"

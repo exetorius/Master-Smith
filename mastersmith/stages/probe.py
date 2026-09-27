@@ -133,7 +133,9 @@ def find_regions(job, skill, probe):
     if job.spec.rig and skill["meta"].get("rig_parts_prompt"):
         wanted["wheel"] = (skill["meta"]["rig_parts_prompt"], ["posy", "negy", "iso"])
     seeds = skill["meta"].get("part_seeds") if isinstance(skill["meta"].get("part_seeds"), list) else []
-    want_parts = job.spec.part_seeds if job.spec.part_seeds is not None else (job.spec.premium or job.spec.tri_budget >= 150000)
+    # hero budgets or an explicit ask only: `premium` is the picture model and nothing else (it silently seeded an
+    # optic onto a bullpup whose brief said "no scope", 2026-09-25)
+    want_parts = job.spec.part_seeds if job.spec.part_seeds is not None else job.spec.tri_budget >= 150000
     if want_parts and getattr(job.spec, "style", "realistic") == "realistic" and not getattr(job.spec, "retexture", False):
         for i, sd in enumerate(seeds[:3]):
             wanted["seed%d" % i] = (part_variants(job.spec, sd), ["posy", "negy", "iso", "posx", "negx"])

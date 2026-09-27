@@ -69,6 +69,48 @@ def test_seed_payload_switches_to_multiview_with_two_views():
     assert seed_payload(tiny, ["u"])[1]["face_limit"] == 150000
 
 
+def test_weapon_glass_follows_the_caption():
+    assert Spec(name="R", description="a carbine with a 4x ACOG scope on the rail", category="weapon").glass is True
+    assert Spec(name="R", description="a bullpup carbine, no sling, no hands, no scope.", category="weapon").glass is False
+    assert Spec(name="R", description="a plain pump shotgun with a wooden stock", category="weapon").glass is False
+    assert Spec(name="R", description="a pistol with a red-dot sight and a weapon light", category="weapon").glass is True
+    assert Spec(name="R", description="a plain rifle", category="weapon", glass=True).glass is True      # an explicit ask wins
+    assert Spec(name="R", description="a sedan", category="vehicle").glass is True
+
+
+def test_part_seeds_need_a_hero_budget_or_an_ask_not_premium():
+    from mastersmith.stages.parts import part_denied_by_brief, part_present
+    steps = lambda s: [n for n, _ in pricing.estimate(s)["steps"]]              # noqa: E731
+    assert not any("separately seeded" in n for n in steps(Spec(name="R", description="rifle", category="weapon", premium=True)))
+    assert any("separately seeded" in n for n in steps(Spec(name="R", description="rifle", category="weapon", tri_budget=150000)))
+    assert any("separately seeded" in n for n in steps(Spec(name="R", description="rifle", category="weapon", part_seeds=[{"phrase": "x"}])))
+    bull = Spec(name="B", description="a bullpup carbine, no sling, no hands, no scope.", category="weapon")
+    assert part_denied_by_brief(bull, "the optic or scope mounted on top of the gun") == "scope"
+    assert part_denied_by_brief(bull, "the detachable magazine of the gun") is None
+    assert part_denied_by_brief(Spec(name="B", description="a rifle without a magazine", category="weapon"), "the detachable magazine of the gun") == "magazine"
+
+    class Llm:
+        def __init__(self, answer):
+            self.answer, self.asked = answer, 0
+
+        def vision(self, prompt, files):
+            self.asked += 1
+            return self.answer
+
+    class Job:
+        def __init__(self, answer):
+            self.llm, self.lines = Llm(answer), []
+
+        def log(self, m):
+            self.lines.append(m)
+    j = Job('{"present": false, "confidence": 0.9, "what": "a bare rail"}')
+    assert part_present(j, bull, {"name": "Optic", "phrase": "the optic or scope mounted on top of the gun"}, "ref.png") is False
+    assert j.llm.asked == 0 and "the brief says no scope" in j.lines[-1]        # denied by the brief: no vision call
+    assert part_present(j, bull, {"name": "Magazine", "phrase": "the detachable magazine of the gun"}, "ref.png") is False
+    assert j.llm.asked == 1 and "not seen on the reference" in j.lines[-1]
+    assert part_present(Job('{"present": true, "confidence": 0.8}'), bull, {"name": "Magazine", "phrase": "the detachable magazine of the gun"}, "ref.png") is True
+
+
 def test_hi3d_multiview_fills_its_named_slots_from_our_view_list():
     w = Spec(name="A", description="x", category="weapon", seed_vendor="hitem3d3mv")
     model, p = seed_payload(w, ["left", "front", "mirror"])          # the weapon skill: profile, muzzle view, mirrored profile
@@ -414,7 +456,7 @@ def test_texture_fixes_are_a_known_catalogue():
     s = Spec(name="Jet", description="grey jet", category="aircraft", texture_fixes=["delight", " Dark_Canopy ", "nonsense", "delight"])
     assert s.texture_fixes == ["delight", "dark_canopy"]
     assert Spec(name="Jet", description="grey jet").texture_fixes == []
-    assert set(TEXTURE_FIXES) == {"delight", "clear_glass_highlights", "dark_canopy", "kill_highlights", "preserve_seed_maps"}
+    assert set(TEXTURE_FIXES) == {"delight", "clear_glass_highlights", "dark_canopy", "kill_highlights", "preserve_seed_maps", "smooth_organic_normals"}
 
 
 def test_director_ask_records_the_question_and_options():

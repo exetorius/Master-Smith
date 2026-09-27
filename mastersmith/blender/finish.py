@@ -1202,7 +1202,17 @@ def material_pass(found, mat, profile, reference_path):
             matched = np.interp(src_l, s_q, t_q)
             gap = float(np.abs(matched - src_l).mean())
             out["basecolor_tone_gap"] = round(gap, 3)
-            if gap > 0.06 and profile.get("tone_match", 0.6) is not None:
+            # a quantile match assumes the atlas and the photo show the same mix of tones. An atlas with a far larger
+            # share of black texels (rail, barrel, bore) than the photo's foreground maps its mid-grey body onto the
+            # photo's light tones and LIGHTENS it (the Hi3D bullpup: 30% vs 8% dark, lum 0.27 -> 0.35, 2026-09-25)
+            _used = src_l > 0.03
+            dark_src = float((src_l[_used] < 0.12).mean()) if _used.any() else 0.0
+            dark_ref = float((ref_l[fg] < 0.12).mean())
+            out["basecolor_dark_share"] = [round(dark_src, 3), round(dark_ref, 3)]
+            if gap > 0.06 and profile.get("tone_match", 0.6) is not None and abs(dark_src - dark_ref) > 0.15:
+                log("base colour tone pull skipped: the atlas is %.0f%% dark texels, the photo %.0f%%; a quantile match would "
+                    "lighten the body instead of matching it" % (dark_src * 100, dark_ref * 100))
+            elif gap > 0.06 and profile.get("tone_match", 0.6) is not None:
                 # the further off the atlas is, the harder it is pulled (a 0.5 pull left the Havoc light blue against
                 # a slate-grey reference, 2026-09-18); the profile value is the floor
                 strength = float(min(0.85, profile.get("tone_match", 0.6) + max(0.0, gap - 0.06) * 2.0))
@@ -2138,6 +2148,18 @@ def fit_part(obj, faces, glb, name):
         if slot.material:
             slot.material.name = "MI_%s_%s" % (NAME, name)
     p.name = name
+    # the part's slice of the budget, as for an added part: an optic seed joined to the 355k-face bullpup took the
+    # whole 60k collapse and the body shredded (2026-09-25). Reduced on its own and marked so the LODs spare it.
+    part_budget = max(int(int(args["tri_budget"]) * ADDED_PART_SHARE), 3000)
+    part_tris = blib.tri_count(p)
+    if part_tris > part_budget:
+        mod = p.modifiers.new("dec_part", "DECIMATE")
+        mod.ratio = part_budget / float(part_tris)
+        mod.use_collapse_triangulate = True
+        blib.select_only([p])
+        bpy.ops.object.modifier_apply(modifier="dec_part")
+    vg = p.vertex_groups.new(name=ADDED_GROUP)
+    vg.add(list(range(len(p.data.vertices))), 1.0, "REPLACE")
     # old faces shrink toward the box centre
     loop_start = np.empty(n, np.int32); me.polygons.foreach_get("loop_start", loop_start)
     loop_total = np.empty(n, np.int32); me.polygons.foreach_get("loop_total", loop_total)
@@ -2551,6 +2573,14 @@ for _pass in range(3):
 if "smooth_organic_normals" in TEXTURE_FIXES:
     report.setdefault("normal_repairs", []).append(smooth_organic_normals(lod0))
 
+# the collapse leaves specks of its own (a dot under the bullpup's rail that no segmenter could target, 2026-09-25)
+try:
+    _lod0_specks = drop_floaties(lod0)
+    if _lod0_specks:
+        report["floaties_removed_lod0"] = _lod0_specks
+except Exception as exc:  # noqa: BLE001 - a speck is not worth a failed build
+    log("LOD0 floater pass skipped: %s" % str(exc)[:120])
+
 
 def bake_detail(high, low):
     """Tangent normal + AO of the high-poly seed baked onto LOD0 (issue #1). The vendor's normal map is flat, so
@@ -2722,11 +2752,30 @@ def apply_bake(low, baked):
 
 
 _used_slots = {p.material_index for p in lod0.data.polygons}
-_material_domains = [lod0.material_slots[i].material.name for i in _used_slots
-                     if i < len(lod0.material_slots) and lod0.material_slots[i].material]
+
+
+def atlas_domains(obj, used_slots):
+    """One entry per distinct base-colour IMAGE among the used materials. The finish's own materials (the glass slot,
+    a repaired barrel's flat colour, a recoloured family) share the body's atlas and must not stop the bake: on the
+    bullpup (2026-09-25) glass + barrel + body counted as three "domains" and no build ever got its normal map.
+    Only a joined vendor part brings an atlas of its own, and it shows up here as a second image."""
+    images, names = [], []
+    for i in sorted(used_slots):
+        if i >= len(obj.material_slots) or not obj.material_slots[i].material:
+            continue
+        m = obj.material_slots[i].material
+        names.append(m.name)
+        bsdf = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None) if m.node_tree else None
+        node = image_feeding(bsdf.inputs["Base Color"])[0] if bsdf is not None else None
+        if node is not None and getattr(node, "image", None) is not None and node.image.name not in images:
+            images.append(node.image.name)
+    return images or names[:1], names
+
+
+_material_domains, _material_names = atlas_domains(lod0, _used_slots)
 _bake_skip = detail_bake_skip_reason(_material_domains, "preserve_seed_maps" in TEXTURE_FIXES)
 if args.get("bake_detail", True) and _bake_skip:
-    report["bake"] = {"status": "skipped", "reason": _bake_skip, "material_domains": _material_domains}
+    report["bake"] = {"status": "skipped", "reason": _bake_skip, "material_domains": _material_domains, "materials": _material_names}
     log("detail bake skipped: " + _bake_skip + "; preserving source texture maps")
 elif args.get("bake_detail", True):
     try:

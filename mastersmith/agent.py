@@ -21,10 +21,15 @@ How a job goes:
    with 2-4 concrete options: the chat shows them as numbered buttons the customer can click, and they may also
    type anything. Do that whenever you need a decision, including "go ahead?" moments and which remedy to apply. Write `description`
    as a photo caption: what it is, its materials and colours, distinctive parts, era. Write colours as a camera
-   sees them, never as trade terms ('blued steel' is dark blue-black oxidised steel, not blue). Fixed-wing aircraft are
+   sees them, never as trade terms ('blued steel' is dark blue-black oxidised steel, not blue). With a customer photo,
+   read each part's colour off the photo (a magazine or grip the same grey as the body is grey, not 'black'): the
+   reviewer holds the model to your caption, and a wrong colour word costs a repaint. Fixed-wing aircraft are
    category "aircraft" and rotorcraft "helicopter" (not "vehicle"). Name real machines by name
    and put that name in search_query so a real photograph is found; leave search_query empty for invented things.
    When the customer attached pictures, put them in reference_images (they are edited into the build picture).
+   For a hard-surface build (weapon, vehicle, aircraft) from the customer's photo, seed_vendor "hitem3d3mv" is the
+   quality pick: Hi3D v3's crisp geometry from every approved angle, same price as one angle. `premium` only changes
+   the picture model (pin picture_model instead); it does not add parts. Part seeds run on hero budgets alone.
    When the customer wants an existing model changed, keep the whole description and put only what changes in
    edit_instructions; the previous picture is edited so the rest of the design stays as it was. When only colours,
    finishes or materials change ("the stock should be gunmetal, not cream"), set retexture=true and name the parts in
@@ -120,14 +125,15 @@ TOOLS = [
             "research": {"type": "boolean", "description": "Force web research on or off (default: on when search_query is set and no pictures were supplied)"},
             "single_picture": {"type": "boolean", "description": "ONLY when the customer explicitly asks for a single picture / "
                                "one view. Leave it out otherwise: every build draws and seeds from several angles by default."},
-            "premium": {"type": "boolean", "description": "Dearer picture model for hard briefs"},
+            "premium": {"type": "boolean", "description": "Dearer picture model for hard briefs; it changes the pictures only "
+                        "(no separately seeded parts). Pinning picture_model does the same without the flag."},
             "seed_vendor": {"type": "string", "enum": ["tripo", "hitem3d3mv", "hitem3d3", "meshy7mv", "meshy7", "hitem3d"],
                             "description": "The mesh vendor. Leave unset for the default (Tripo). hitem3d3 = Hitem3D v3 at 2048 voxels, the "
                                            "crispest hard-surface geometry (about $2.10 a seed): the answer to melted rails, fused trigger "
                                            "guards and blobby detail; hitem3d3mv = the same model fed every approved angle (front, side, mirrored "
                                            "side, back when drawn) for the same price, the better pick whenever more than one view was "
                                            "approved. A change of vendor seeds again from the approved pictures."},
-            "glass": {"type": "boolean", "description": "Give windows/lenses a glass material slot (default for vehicles, weapons, buildings)"},
+            "glass": {"type": "boolean", "description": "Give windows/lenses a glass material slot (default for vehicles and buildings; a weapon gets one only when its caption describes a scope, optic, lens or light)"},
             "rig": {"type": "boolean", "description": "Rig it: characters get a UE5-named humanoid skeleton with walk/run clips; vehicles get wheel bones; weapons get Muzzle/Grip/Sight socket bones"},
             "notes": {"type": "string"},
             "edit_instructions": {"type": "string", "description": "When changing an EXISTING model: one or two sentences naming only "

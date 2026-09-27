@@ -215,6 +215,8 @@ tests/                     pure tests; a Blender test behind MASTERSMITH_BLENDER
 A skill is a Markdown file in `mastersmith/skills/` with `reference_view`, `second_view`, `mirror_as_third_view`,
 `forward_axis` (long|up), `origin` (bottom|center) in the front matter, plus optional `glass_prompt`,
 `rig_parts_prompt`, `material_families`, `repair_cylinders` and `part_seeds` lists the probe turns into SAM masks.
+Part seeds run on hero budgets (150k+ triangles) or when the brief sets `part_seeds`, never on `premium` alone, and
+only for a part the brief allows and the reference shows; each takes a slice of the triangle budget like an added part.
 A new fal endpoint needs a row in `pricing.FAL_PRICES` and a call site in a stage; nothing else.
 
 ## License

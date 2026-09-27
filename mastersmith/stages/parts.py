@@ -4,6 +4,7 @@ the vendor gets right. The picture editor cuts the part out of the reference on 
 finish pass fits the seed into the bounding box of the part's faces on the body (the cockpit path), shrinking the
 old faces underneath. Gated to premium / hero builds by the caller."""
 import os
+import re
 
 from .. import config, pricing
 from ..fal import first_url
@@ -12,10 +13,45 @@ from ..llm import extract_json
 CHECK = """Is this a clear picture of ONE {part}, whole, isolated on a plain white background, with no other part of the
 object around it? Answer JSON only: {{"ok": true/false, "score": 1-10, "fixes": "one sentence"}}"""
 
+PRESENT = """Does this picture actually show {part}, as a part that is there on the object (not merely a place where one could
+be mounted)? Answer JSON only: {{"present": true/false, "confidence": 0-1, "what": "few words on what is there"}}"""
+
+_STOP = {"the", "mounted", "attached", "detachable", "gun", "rifle", "top", "front", "rear", "with", "that", "of", "on",
+         "or", "and", "a", "an", "vehicle", "aircraft", "object", "small", "large"}
+
+
+def part_denied_by_brief(spec, phrase):
+    """The word of the brief that rules the part out ('no scope' -> 'scope'), or None. The picture editor draws whatever
+    it is asked for: an EOTech appeared on a bullpup whose brief said 'no scope' (2026-09-25), so a part the brief
+    denies is never drawn or seeded."""
+    text = " ".join([getattr(spec, "description", "") or "", getattr(spec, "notes", "") or ""]).lower()
+    for w in re.findall(r"[a-z]+", (phrase or "").lower()):
+        if len(w) < 4 or w in _STOP:
+            continue
+        for stem in {w, w.rstrip("s")}:
+            if re.search(r"\b(no|without|never)\s+(a\s+|an\s+|any\s+)?%s" % re.escape(stem), text):
+                return w
+    return None
+
+
+def part_present(job, spec, part, reference_path):
+    """False when the brief denies the part or the reference does not show it; one vision call at most."""
+    denied = part_denied_by_brief(spec, part["phrase"])
+    if denied:
+        job.log("  part %s: the brief says no %s; not seeded" % (part.get("name"), denied))
+        return False
+    j = extract_json(job.llm.vision(PRESENT.format(part=part["phrase"]), [reference_path])) or {}
+    if not j.get("present") or float(j.get("confidence") or 0) < 0.5:
+        job.log("  part %s: not seen on the reference (%s); not seeded" % (part.get("name"), j.get("what") or "no answer"))
+        return False
+    return True
+
 
 def make_part_seed(job, spec, part, reference_path):
     """part: {"phrase": "...", "name": "Magazine"} -> {"glb", "picture"} or None."""
     phrase = part["phrase"]
+    if not part_present(job, spec, part, reference_path):
+        return None
     fixes = ""
     picture = None
     for attempt in range(2):

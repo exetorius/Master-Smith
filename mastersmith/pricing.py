@@ -198,7 +198,7 @@ def estimate(spec):
                           REPAINT_PICTURES * image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD))
         else:
             steps.append(("hybrid repaint of the seed (Meshy retexture, original UVs)", price(config.RETEXTURE_MODEL)))
-    if spec.category in config.HARD_SURFACE_CATEGORIES and (spec.premium or spec.tri_budget >= 150000):
+    if spec.category in config.HARD_SURFACE_CATEGORIES and (spec.part_seeds or spec.tri_budget >= 150000):
         steps.append(("separately seeded parts (up to 2: picture + seed each)", 2 * (image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD
                       + price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"}))))
     if getattr(spec, "cockpit", False):
