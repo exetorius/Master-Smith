@@ -114,5 +114,24 @@ Calls (every length in metres; sizes are full sizes, not half sizes):
   kit.array(piece, count, offset)                           count copies, each offset (dx, dy, dz) further; joined
   kit.mirror(piece, axis="Y")                               add a mirrored copy
   kit.move(piece, offset)  kit.rotate(piece, degrees, axis="Z", pivot=(0,0,0))  kit.join(*pieces)
+Shapes beyond straight extrusions:
+  kit.revolve(points, center=(0,0,0), axis="X", sides=48)   lathe: (a, r) points along the axis spun round it -
+        stepped barrels, muzzle devices, knobs, scope bodies, wheel rims, domes; an end with r > 0 is capped
+  kit.loft(sections, axis="X", samples=48)                  skin through cross-sections [(position, outline), ...];
+        axis X outlines are (y, z) points, Y: (x, z), Z: (x, y). Outlines may differ (a rectangle to a rounded nose) -
+        a receiver or stock that changes section along its length, a tapering nose, a fuselage
+  kit.sweep(points, radius, sides=16)                       round rod along a 3D path: handles, loops, bent pipes
+Shaping a piece (returns the same piece):
+  kit.fillet(piece, radius, segments=4, region=None)        real rounded edges; make the piece with bevel=0 first.
+        region=(x0, y0, z0, x1, y1, z1) rounds only the edges inside that box
+  kit.smooth(piece, levels=2, crease_angle=None)            subdivision: a blocky bevel=0 cage becomes moulded curves
+        (grips, stocks, rounded housings); edges sharper than crease_angle degrees stay crisp
+  kit.bend(piece, degrees, along="X", toward="Z", fixed=None)   curve the piece's length (a banana magazine:
+        along="Z", toward="X"); the section at coordinate `fixed` stays put (default the middle)
+  kit.taper(piece, scale, along="X", keep="min")            scale the cross-section from 1 at the keep end to scale
+  kit.shell(piece, thickness)                               hollow it inwards; cut an opening to show the wall
 bevel=None picks a width from the piece's smallest side (6%, 0.2-1.5 mm); bevel=0 keeps a razor edge.
+Build the shape the picture shows, not a stack of boxes: moulded housings and stocks are lofts or smoothed cages with
+fillets, round parts are revolves, curved parts are bent. Details (ribs, vents, screws, seams, grooves, texture
+panels) are cut or added as real geometry, the picture's surface is not painted on later.
 """

@@ -192,3 +192,37 @@ def test_code_parts_build_and_assemble_into_a_game_ready_asset():
         _blender("build_part.py", bad)
         res = json.load(open(os.path.join(d, "parts", "Bad.json")))
         assert not res["ok"] and "of its box along X" in res["error"]
+
+
+SHAPES = '''def build(kit, L, W, H):
+    body = kit.loft([(-L / 2, [(-W / 2, -H / 4), (W / 2, -H / 4), (W / 2, H / 4), (-W / 2, H / 4)]),
+                     (0.0, [(-W / 2, -H / 2), (W / 2, -H / 2), (W / 2, H / 2), (-W / 2, H / 2)]),
+                     (L / 4, [(W / 2 * math.cos(a * math.pi / 8), H / 2 * math.sin(a * math.pi / 8)) for a in range(16)])],
+                    axis="X", bevel=0)
+    body = kit.fillet(body, W * 0.1, segments=3, region=(-L / 2, -W, 0, L / 4, W, H))
+    barrel = kit.revolve([(L / 4, 0), (L / 4, H * 0.2), (L * 0.4, H * 0.2), (L * 0.4, H * 0.12), (L / 2, H * 0.12),
+                          (L / 2, 0)], axis="X", sides=24)
+    mag = kit.box((-L / 8, 0, 0), (L * 0.08, W * 0.6, H * 0.8), bevel=0)
+    mag = kit.taper(mag, 0.8, along="Z", keep="max")
+    mag = kit.bend(mag, 20, along="Z", toward="X", fixed=H * 0.4)
+    grip = kit.smooth(kit.box((-L * 0.3, 0, -H * 0.2), (L * 0.1, W * 0.7, H * 0.5), bevel=0), 2, crease_angle=None)
+    loop = kit.sweep([(-L * 0.45, 0, H * 0.3), (-L * 0.4, 0, H * 0.45), (-L * 0.3, 0, H * 0.45), (-L * 0.25, 0, H * 0.3)],
+                     W * 0.05)
+    hood = kit.shell(kit.box((L * 0.1, 0, H * 0.3), (L * 0.1, W * 0.8, H * 0.3), bevel=0), W * 0.05)
+    return [body, barrel, mag, grip, loop, hood]
+'''
+
+
+@BLENDER
+def test_the_kit_shapes_build():
+    with tempfile.TemporaryDirectory() as d:
+        a = os.path.join(d, "s.json")
+        json.dump({"name": "Shapes", "code": SHAPES, "size": [0.4, 0.06, 0.12], "material": {"color": "#505050"},
+                   "out_dir": os.path.join(d, "parts"), "render_size": 256}, open(a, "w"))
+        _blender("build_part.py", a)
+        res = json.load(open(os.path.join(d, "parts", "Shapes.json")))
+        assert res["ok"], res.get("error")
+        keep = os.environ.get("MASTERSMITH_KEEP_RENDERS")
+        if keep:
+            import shutil
+            shutil.copytree(os.path.join(d, "parts"), keep, dirs_exist_ok=True)
