@@ -23,8 +23,10 @@ approved pictures ──► PLAN (builder LLM, vision)          one box per part
 
 - A barrel, a rail, a muzzle brake or a trigger guard is a few primitives. Built in code they have exact edges,
   real bevels and clean normals, at a few hundred triangles each.
-- What code cannot model well (a moulded grip, a sculpted stock) goes to the vendor ALONE. A part on its own is a
-  simple shape the vendor gets right; the whole gun at once is where it melts.
+- What code cannot model well goes to the vendor: the sculpted MAIN BODY (the moulded receiver and stock, a pistol
+  frame with its grip, a vehicle's body shell) as one part, drawn WITHOUT the mechanical parts code builds. The
+  vendor gets the body's shape and surface right; code gets the thin, sharp and repeated parts right. The picture
+  prompt names the code parts inside the body's box to leave out, so nothing is modelled twice.
 - Every part is checked before it joins the rest. Nothing is repaired afterwards, on this path or any other: the
   post-op repairs (cylinder repair, tone pull, de-light, recolour under masks, part removal, added parts) were
   removed on 2026-09-26. A wrong part is rebuilt, not patched.
@@ -55,15 +57,27 @@ and a few builtins; the code is checked by an allowlist before Blender runs it.
 | `kit.array(obj, count, offset)` | repeats a piece (rail teeth, ports, grooves) |
 | `kit.mirror(obj, axis="Y")` | a mirrored copy joined in |
 | `kit.move(obj, offset)` / `kit.rotate(obj, degrees, axis)` | placement |
+| `kit.revolve(points, center, axis="X", sides=48)` | a lathe: (a, r) outline spun round the axis (stepped barrels, muzzle devices, knobs, rims, domes) |
+| `kit.loft(sections, axis="X", samples=48)` | a solid skinned through differing cross-sections (a receiver that changes section, a nose, a fuselage) |
+| `kit.sweep(points, radius, sides=16)` | a round rod along a 3D path (handles, loops, bent pipes) |
+| `kit.fillet(obj, radius, segments=4, region=None)` | real rounded edges, optionally only inside a region box |
+| `kit.smooth(obj, levels=2, crease_angle=None)` | subdivision of a blocky cage into moulded curves; sharper edges stay creased |
+| `kit.bend(obj, degrees, along, toward, fixed=None)` | curves a piece (a banana magazine) |
+| `kit.taper(obj, scale, along, keep="min")` | narrows the cross-section along an axis |
+| `kit.shell(obj, thickness)` | hollows a piece inwards |
 
-`bevel=None` picks a width from the piece's smallest side (6%, 0.2 to 1.5 mm), 0 turns it off.
+`bevel=None` picks a width from the piece's smallest side (6%, 0.2 to 1.5 mm), 0 turns it off. The builder is told to
+pick the call by the shape (round: revolve; changing section: loft; moulded: smoothed cage or fillet) rather than
+stacking boxes, and to list every feature it sees, with its position in mm, before it writes code.
 
 ## Choosing
 
-`build_mode` on the brief: `None` builds hard-surface categories (weapon, vehicle, aircraft, helicopter) as an
-assembly when the approved pictures include a side and a front view, and everything else as one seed. `"assembly"`
-or `"single"` forces a path. The builder LLM is `MASTERSMITH_BUILDER_MODEL` (default Claude Opus 5.5 on
-OpenRouter). The vendor for parts follows the brief's `seed_vendor`: Hi3D v3 when it names Hi3D, else Tripo.
+`build_mode` on the brief: `"assembly"` builds a hard surface as parts; unset or `"single"` builds one seed. Assembly
+is opt-in until it beats one seed on the same object (`MASTERSMITH_ASSEMBLY_DEFAULT=1` makes it the hard-surface
+default again). Big parts (a housing, a stock) are written by `MASTERSMITH_BUILDER_MODEL` (default Claude Opus 5.5 on
+OpenRouter), small ones (pins, levers, sights) by the cheaper `MASTERSMITH_BUILDER_MODEL_SMALL` (Claude Sonnet 5):
+the builder calls were 97% of an assembly's cost. The vendor for parts follows the brief's `seed_vendor`: Hi3D v3
+when it names Hi3D, else Tripo.
 
 ## What makes it hold together (learnt on the first test objects, 2026-09-27)
 
@@ -80,6 +94,11 @@ Each of these came from a live build that went wrong; the first shippable assemb
   the builder is told that face must reach the box edge, and touching boxes overlap by 1-2%.
 - **The builder checks itself against the same framing.** Each code part is rendered orthographically in clay,
   framed on its own box, beside the reference cropped to that box with a millimetre scale; up to two corrections.
+  The check lists every feature the reference shows and marks each FOUND or MISSING; only a list with nothing
+  missing ends in `VERDICT: OK`.
+- **Code parts carry the reference's fine detail.** A high-pass of the plan's side and front pictures (inside the
+  silhouette only) is projected onto code parts by position and normal before the bake: it shades the base colour and
+  drives a bump, so the colour and normal maps both carry the panel lines, screws and ribs the picture shows.
 - **Vendor parts are registered, not guessed.** The part is drawn alone in the reference's side view, seeded, and
   turned (four upright turns, all 24 as a fallback) until its side silhouette best matches the picture; it then
   fills its box on every side.
