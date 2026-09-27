@@ -294,13 +294,18 @@ def build_vendor_part(job, spec, part, plan):
     os.makedirs(out_dir, exist_ok=True)
     ref = plan["side"]
     picture, fixes = None, ""
+    # the parts modelled separately inside or against this one's box are left out of its picture, so the vendor does not
+    # model them twice (a soft copy of the barrel under the crisp code barrel)
+    others = [q["name"] for q in plan["parts"] if q["name"] != name and q.get("method") == "code"
+              and all(min(q["box_max"][i], part["box_max"][i]) - max(q["box_min"][i], part["box_min"][i]) > 0 for i in range(3))]
+    leave_out = (" Leave out, they are modelled separately: %s." % ", ".join(others)) if others else ""
     for attempt in range(2):
         path = os.path.join(out_dir, "picture_%d.png" % attempt)
         # the SAME side view as the reference (forward to the right): its silhouette is what the seed is registered to
         job.images.generate("Show ONLY %s from this exact object, whole and complete, exactly as it looks here (same shape, "
                             "colours and materials), seen from exactly the same side angle as this picture with the forward "
                             "end to the right, isolated on a plain pure white background, nothing else in frame, sharp product "
-                            "photograph. %s" % (part["what"], fixes),
+                            "photograph.%s %s" % (part["what"], leave_out, fixes),
                             path, model=pricing.edit_model(spec), references=[ref], aspect_ratio="1:1")
         j = extract_json(job.llm.vision(PART_CHECK.format(part=part["what"]), [path])) or {}
         if j.get("ok") and int(j.get("score", 0) or 0) >= 6:

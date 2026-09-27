@@ -21,7 +21,7 @@ Picture 1 is the SIDE view, cropped exactly to the object: the forward end (muzz
 Picture 2 is the FRONT view (looking back at the forward end), cropped exactly to the object: the object's left is on
 the right of the picture. Both carry a grid in percent: 0 at the left / top edge, 100 at the right / bottom edge.
 
-Split the object into the parts an artist would model separately (between 4 and {max_parts}): the main housing or
+Split the object into the parts an artist would model separately (between 4 and {max_parts}): the main moulded
 body, and every piece that is its own shape - barrel, muzzle device, rail, each sight, magazine, pistol grip, trigger,
 trigger guard, handguard, stock, cheek rest, charging handle, panels, pins that matter at game distance. No decals,
 no text, no screws smaller than 1% of the length.
@@ -30,12 +30,19 @@ Keep together what is ONE moulding or casting in reality: a polymer pistol frame
 a rifle stock with its pistol grip, a vehicle's one-piece body shell. A cut through the middle of one moulding
 becomes a visible seam or gap when the halves are built apart.
 
-For each part choose how it is built:
-- "code": built from boxes, cylinders, tubes and straight-extruded outlines with holes, slots and repeats. Barrels,
-  muzzle brakes, rails, sight blades, triggers, trigger guards, magazines, flat or faceted panels, handguards with cut
-  vents, housings whose side outline is the shape. PREFER code: it gives exact edges.
-- "vendor": moulded or sculpted compound curves that an outline cannot describe: a pistol grip with finger grooves,
-  a rounded organic stock. Use it sparingly; each one is an AI image-to-3D model of that part alone.
+For each part choose how it is built. The two methods have opposite strengths, so split the work by them:
+- "vendor": an AI image-to-3D model of that part alone. Right shape and surface on sculpted, moulded bodies; soft on
+  thin, sharp or repeated detail. Use it for the MAIN BODY - the moulded housing, receiver, stock, a pistol frame with
+  its grip and guard, a vehicle's body shell - as ONE part drawn without its attached mechanical parts. In its "what",
+  say what it is and list the parts it is drawn WITHOUT ("the moulded receiver and stock, without the barrel, rail,
+  sights, magazine and charging handle").
+- "code": modelled in code with a hard-surface kit (boxes, cylinders, tubes, outlines, lofts, bends, rounded and
+  subdivided shapes, exact cuts and repeats). Exact edges; weak on free-form sculpted surfaces. Use it for the
+  mechanical parts: barrels, muzzle devices, rails, sights, triggers, levers, pins, magazines, wheels, bumpers, flat
+  or faceted panels, vents and slotted handguards.
+A typical weapon is one vendor body and 6-15 code parts; a typical vehicle one vendor body shell and code wheels,
+bumpers, lights, mirrors and racks. Never model the main body in code as slabs; never send a barrel or a rail to the
+vendor.
 
 Answer JSON only:
 {{"parts": [{{"name": "PascalCase unique", "what": "one sentence: shape, features to model, colour and finish",
