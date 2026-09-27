@@ -100,12 +100,88 @@ def surface_area(o):
     return sum(p.area for p in o.data.polygons)
 
 
+def add_reference_detail(o, det):
+    """Project the reference's fine detail (a grey high-pass map, 0.5 = none) onto a code part's materials, from the
+    side picture on faces that look sideways and the front picture on faces that look forward: it darkens and lightens
+    the base colour and drives a bump, so the colour and normal bakes both carry it. Parts sit in the asset frame
+    (identity transforms), the frame the plan's pictures were cropped to."""
+    L_, W_, H_ = (float(v) for v in det["dims"])
+    s = float(det.get("strength", 0.6))
+    images = {}
+    for view in ("side", "front"):
+        if det.get(view) and os.path.exists(det[view]):
+            img = bpy.data.images.load(os.path.abspath(det[view]), check_existing=True)
+            img.colorspace_settings.name = "Non-Color"
+            images[view] = img
+    if "side" not in images:
+        return False
+    for m in {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}:
+        t = m.node_tree
+        b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if b is None:
+            continue
+        N, K = t.nodes, t.links
+
+        def op(kind, a, c=None):
+            n = N.new("ShaderNodeMath")
+            n.operation = kind
+            for i, v in enumerate((a, c)):
+                if v is None:
+                    continue
+                if isinstance(v, (int, float)):
+                    n.inputs[i].default_value = float(v)
+                else:
+                    K.new(v, n.inputs[i])
+            return n.outputs[0]
+        geo = N.new("ShaderNodeNewGeometry")
+        pos = N.new("ShaderNodeSeparateXYZ")
+        nrm = N.new("ShaderNodeSeparateXYZ")
+        K.new(geo.outputs["Position"], pos.inputs[0])
+        K.new(geo.outputs["Normal"], nrm.inputs[0])
+
+        def look(img, u_sock, u_len):
+            uv = N.new("ShaderNodeCombineXYZ")
+            K.new(op("ADD", op("DIVIDE", u_sock, u_len), 0.5), uv.inputs[0])
+            K.new(op("ADD", op("DIVIDE", pos.outputs["Z"], H_), 0.5), uv.inputs[1])
+            tex = N.new("ShaderNodeTexImage")
+            tex.image = img
+            tex.extension = "EXTEND"
+            K.new(uv.outputs[0], tex.inputs["Vector"])
+            return op("SUBTRACT", tex.outputs["Color"], 0.5)
+        term = op("MULTIPLY", look(images["side"], pos.outputs["X"], L_), op("MULTIPLY", nrm.outputs["Y"], nrm.outputs["Y"]))
+        if "front" in images:
+            term = op("ADD", term, op("MULTIPLY", look(images["front"], pos.outputs["Y"], W_),
+                                      op("MULTIPLY", nrm.outputs["X"], nrm.outputs["X"])))
+        base = b.inputs["Base Color"]
+        if base.is_linked:
+            src = base.links[0].from_socket
+        else:
+            rgb = N.new("ShaderNodeRGB")
+            rgb.outputs[0].default_value = tuple(base.default_value)
+            src = rgb.outputs[0]
+        scale = N.new("ShaderNodeVectorMath")
+        scale.operation = "SCALE"
+        K.new(src, scale.inputs[0])
+        K.new(op("ADD", op("MULTIPLY", term, 2.0 * s), 1.0), scale.inputs["Scale"])
+        K.new(scale.outputs["Vector"], base)
+        if not b.inputs["Normal"].is_linked:
+            bump = N.new("ShaderNodeBump")
+            bump.inputs["Strength"].default_value = min(1.0, 0.5 * s)
+            bump.inputs["Distance"].default_value = 0.0006
+            K.new(term, bump.inputs["Height"])
+            K.new(bump.outputs["Normal"], b.inputs["Normal"])
+    return True
+
+
 # ---------------------------------------------------------------- parts in their boxes
 bpy.ops.wm.read_factory_settings(use_empty=True)
 parts, glass_parts = [], []
 for p in args["parts"]:
     o = import_part(p)
     rec = {"name": p["name"], "kind": p["kind"], "box_min": p["box_min"], "box_max": p["box_max"], **fit(o, p)}
+    # code parts carry the reference's fine detail; vendor parts already have their own texture
+    if p["kind"] == "code" and args.get("detail") and not (p.get("material") or {}).get("glass"):
+        rec["reference_detail"] = add_reference_detail(o, args["detail"])
     for slot in o.material_slots:
         if slot.material:
             slot.material.name = "MS_src_%s_%s" % (p["name"], slot.material.name)

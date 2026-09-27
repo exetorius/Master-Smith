@@ -378,6 +378,40 @@ def _register(job, name, glb, picture, out_dir):
         return None
 
 
+def detail_map(src, dst, blur_frac=0.006):
+    """The picture's fine surface detail (panel lines, ribs, knurling, screws, wear) as a grey map centred on 0.5: its
+    luminance minus a blurred copy, inside the object only (the silhouette's own edge would print a halo on the part
+    behind it). The assembler projects it onto code parts, so their surface carries the reference's detail."""
+    import numpy as np
+    from PIL import ImageFilter
+    im = Image.open(src).convert("RGB")
+    a = np.asarray(im).astype(np.float32) / 255.0
+    border = np.concatenate([a[:4].reshape(-1, 3), a[-4:].reshape(-1, 3), a[:, :4].reshape(-1, 3), a[:, -4:].reshape(-1, 3)])
+    back = np.median(border, axis=0)
+    fg = Image.fromarray(((np.abs(a - back).max(axis=2) > 0.08) * 255).astype(np.uint8))
+    grow = max(3, int(max(im.size) * 0.006) | 1)
+    inside = np.asarray(fg.filter(ImageFilter.MinFilter(grow))).astype(np.float32) / 255.0
+    grey = im.convert("L")
+    radius = max(2.0, max(im.size) * blur_frac)
+    hp = (np.asarray(grey).astype(np.float32) - np.asarray(grey.filter(ImageFilter.GaussianBlur(radius))).astype(np.float32)) / 255.0
+    out = 0.5 + np.clip(hp * inside, -0.2, 0.2) * 1.5
+    Image.fromarray((out * 255).clip(0, 255).astype(np.uint8), "L").save(dst)
+    return dst
+
+
+def _detail(job, plan):
+    """Detail maps from the plan's side and front pictures, for the assembler (None when they cannot be made)."""
+    try:
+        d = {"side": detail_map(plan["side"], os.path.join(job.work_dir, "detail_side.png")), "front": None,
+             "dims": plan["dims_m"], "strength": 0.5}
+        if plan.get("front"):
+            d["front"] = detail_map(plan["front"], os.path.join(job.work_dir, "detail_front.png"))
+        return d
+    except Exception as exc:                  # detail is a nicety: an odd picture must not stop the build
+        job.log("  reference detail skipped: %s" % str(exc)[:120])
+        return None
+
+
 def _assemble(job, spec, plan, built, round_no, reference):
     parts = []
     for p in plan["parts"]:
@@ -394,7 +428,8 @@ def _assemble(job, spec, plan, built, round_no, reference):
     out = os.path.join(job.dir, "delivery") if round_no == "final" else os.path.join(job.work_dir, "assembly_%s" % round_no)
     _blender(job, "assemble.py", {"name": spec.name, "out_dir": out, "tri_budget": spec.tri_budget, "engine": spec.engine,
                                   "atlas_size": 4096 if spec.tri_budget >= 100000 else 2048, "render_size": 768,
-                                  "spec": spec.to_dict(), "reference": reference, "parts": parts}, "assemble_%s" % round_no)
+                                  "spec": spec.to_dict(), "reference": reference, "parts": parts,
+                                  "detail": plan.get("detail")}, "assemble_%s" % round_no)
     report = json.load(open(os.path.join(out, "report.json")))
     return out, report
 
@@ -430,6 +465,7 @@ def build_assembly(job, spec, ref):
     side_src, front_src, mirror = views
     job.stage("plan")
     plan = make_plan(job, spec, side_src, front_src, mirror)
+    plan["detail"] = _detail(job, plan)
     job.stage("parts")
     built = {}
 
