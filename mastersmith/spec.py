@@ -7,6 +7,16 @@ STYLES = ("realistic", "stylized")
 
 # Scripted texture repairs the finish can apply on a re-finish of the same seed (no vendor, no spend). The director
 # reaches for these before any repaint or new mesh when the complaint is about the texture, not the shape.
+def assembly_wanted(spec):
+    """Hard surfaces are built from planned parts unless the brief asks for one seed; the pipeline still falls back to
+    one seed when the approved pictures have no side and front view."""
+    if spec.build_mode == "single" or getattr(spec, "retexture", False):
+        return False
+    if spec.build_mode == "assembly":
+        return True
+    return spec.category in ("weapon", "vehicle", "aircraft", "helicopter") and bool(spec.multiview)
+
+
 def weapon_has_glass(description):
     """True when the caption describes an optic, lens or light on the weapon, ignoring negated mentions ("no scope")."""
     import re
@@ -72,6 +82,8 @@ class Spec:
                                       # seeds from; the picture stage is skipped
     remove_parts: list = None         # a repair on the existing mesh: parts to delete in Blender, as descriptive phrases
                                       # ("the extra cylinder attached to the magazine"); re-applied on every re-finish
+    build_mode: str = None            # None -> assembly for hard surfaces with a side + front view, else one seed;
+                                      # "assembly" | "single" force a path (docs/ASSEMBLY.md)
     picture_model: str = None         # OpenRouter image model for this build's pictures (concept, edits, views); None -> config
     texture_fixes: list = None        # scripted texture repairs applied on a re-finish (see TEXTURE_FIXES): free, deterministic
     add_parts: list = None            # parts to model separately and fit onto the existing mesh on a re-finish (see PLACEMENTS):
@@ -114,6 +126,8 @@ class Spec:
             self.glass = self.category in ("vehicle", "aircraft", "helicopter", "environment") or (
                 self.category == "weapon" and weapon_has_glass(self.description))
         self.glass = bool(self.glass)
+        if self.build_mode not in (None, "assembly", "single"):
+            self.build_mode = None
         if self.rig is None:
             self.rig = self.category == "character"
         self.rig = bool(self.rig)

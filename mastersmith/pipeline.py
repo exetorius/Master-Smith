@@ -22,6 +22,8 @@ from .stages.review import review
 from .stages.rig import rig_asset
 from .stages.retexture import make_retexture
 from .stages.seed import hybrid_wanted, make_seed
+from .stages.assembly import build_assembly
+from .spec import assembly_wanted
 
 
 class Job:
@@ -185,6 +187,28 @@ def build(spec, user, wallet, log=print, job_id=None):
             log("1/4 reference picture")
             ref = make_reference(job, skill)
             result["reference"] = {"views": ref["views"], "checks": ref["checks"]}
+        assembled = None
+        if assembly_wanted(spec):
+            log("2/4 assembly: plan the parts, build each one, assemble")
+            assembled = build_assembly(job, spec, ref)
+            if assembled is None:
+                log("  the approved pictures have no side and front view; building from one seed instead")
+        if assembled is not None:
+            report, delivery_dir, record = assembled
+            result["delivery"] = report
+            result["delivery_dir"] = delivery_dir
+            result["assembly"] = record
+            job.stage("review")
+            log("4/4 review")
+            renders = [os.path.join(delivery_dir, r) for r in report["renders"]]
+            result["review"] = review(job, ref["views"][0], renders, report)
+            result["gate"] = gate_check(spec, report, result["review"], delivery_dir)
+            if result["gate"]["warnings"]:
+                log("gate: " + "; ".join(result["gate"]["warnings"]))
+            result["diagnosis"] = []
+            result["package"] = write_package(spec, report, result, delivery_dir)
+            result["status"] = "done"
+            return result          # the finally below settles the bill and writes job.json
         job.stage("seed")
         log("2/4 3D seed")
         seed = make_seed(job, ref.get("seed_urls") or ref["urls"])

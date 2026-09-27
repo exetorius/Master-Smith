@@ -25,14 +25,14 @@ class LLM:
         self.calls = []
         self.stage = ""                  # the pipeline names the stage; every call carries it for the cost breakdown
 
-    def chat(self, messages, model=None, tools=None, max_tokens=1200, temperature=0.3, json_only=False):
+    def chat(self, messages, model=None, tools=None, max_tokens=1200, temperature=0.3, json_only=False, effort="low"):
         """Returns the assistant message dict (content, tool_calls) and records its cost.
 
         Reasoning models spend their thinking INSIDE max_tokens: Gemini 3.8 Flash used 477 of a 500-token
         budget on reasoning and cut the JSON answer off mid-word (2026-09-16). Effort is pinned low - the
         director fills a form and the checker answers yes/no questions - and JSON answers are requested as such."""
         body = {"model": model or config.DIRECTOR_MODEL, "messages": messages, "max_tokens": max_tokens,
-                "temperature": temperature, "usage": {"include": True}, "reasoning": {"effort": "low"}}
+                "temperature": temperature, "usage": {"include": True}, "reasoning": {"effort": effort}}
         if json_only:
             body["response_format"] = {"type": "json_object"}
         if tools:
@@ -65,7 +65,7 @@ class LLM:
         msg = data["choices"][0]["message"]
         return msg
 
-    def vision(self, prompt, image_paths, model=None, max_tokens=1500):
+    def vision(self, prompt, image_paths, model=None, max_tokens=1500, effort="low", json_only=True):
         """One question about one or more local images; returns the text."""
         parts = [{"type": "text", "text": prompt}]
         for p in image_paths:
@@ -75,7 +75,7 @@ class LLM:
                 b64 = base64.b64encode(f.read()).decode()
             parts.append({"type": "image_url", "image_url": {"url": "data:image/%s;base64,%s" % (mime, b64)}})
         msg = self.chat([{"role": "user", "content": parts}], model=model or config.VISION_MODEL,
-                        max_tokens=max_tokens, temperature=0.1, json_only=True)
+                        max_tokens=max_tokens, temperature=0.1, json_only=json_only, effort=effort)
         return msg.get("content") or ""
 
     def spent(self):

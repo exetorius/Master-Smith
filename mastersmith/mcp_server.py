@@ -62,7 +62,7 @@ def set_brief(name: str, description: str, category: str, style: str = "realisti
               rig: bool | None = None, notes: str = "", edit_instructions: str = "", retexture: bool = False,
               retexture_parts: list[dict] | None = None, protect_parts: list[dict] | None = None,
               texture_fixes: list[str] | None = None, remove_parts: list[str] | None = None,
-              add_parts: list[dict] | None = None) -> str:
+              add_parts: list[dict] | None = None, build_mode: str = "", seed_vendor: str = "", picture_model: str = "") -> str:
     """Set or update the build brief. Returns the brief as understood and the worst-case estimate."""
     args = {k: v for k, v in locals().items() if v not in (None, "", 0, 0.0, False, [])}
     if add_parts is not None:

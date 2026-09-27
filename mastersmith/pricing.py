@@ -163,8 +163,44 @@ def vendor_catalogue():
     return out
 
 
+# Assembly builds: what the builder model's calls and the vendor parts cost at most. Settled to actual usage.cost.
+BUILDER_CALL_USD = 0.30             # one builder call with pictures (plan, part code, part check, assembly check)
+ASSEMBLY_CODE_PARTS = 10            # the worst case reserves this many code parts at 2.5 builder calls each
+ASSEMBLY_VENDOR_PARTS = 3
+
+
+def estimate_assembly(spec):
+    """Worst case of the parts path after the pictures: plan, code parts, vendor parts, assembly and its checks."""
+    vendor = seed_vendor(spec)
+    part_seed = FAL_PRICES["hitem3d/hi3d/v3.0/image-to-3d"] if vendor["key"].startswith("hitem3d3") else \
+        price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"})
+    return [
+        ("parts plan from the approved pictures (builder)", 2 * BUILDER_CALL_USD),
+        ("code parts: modelled, built and self-checked (builder, up to %d parts)" % ASSEMBLY_CODE_PARTS,
+         ASSEMBLY_CODE_PARTS * 2.5 * BUILDER_CALL_USD),
+        ("vendor parts: drawn alone and seeded (up to %d, %s)" % (ASSEMBLY_VENDOR_PARTS, vendor["label"] if vendor["key"].startswith("hitem3d3") else "Tripo H3.1"),
+         ASSEMBLY_VENDOR_PARTS * (image_price(edit_model(spec)) + 2 * LLM_CALL_ALLOWANCE_USD + part_seed)),
+        ("assembly checks against the pictures (builder)", config.ASSEMBLY_CHECK_ROUNDS * BUILDER_CALL_USD),
+        ("Blender assembly: place, bake one atlas, LODs, collision, FBX/GLB", 0.0),
+    ]
+
+
 def estimate(spec):
     """Worst-case USD for one build of `spec`, step by step. Reserved up front, settled to actual."""
+    from .spec import assembly_wanted
+    if assembly_wanted(spec):
+        steps = [s for s in _estimate_steps(spec) if s[0].startswith(REFERENCE_STEPS)]
+        steps += estimate_assembly(spec)
+        steps.append(("review the result against the picture (vision)", LLM_CALL_ALLOWANCE_USD))
+        steps.append(("director chat overhead", 2 * LLM_CALL_ALLOWANCE_USD))
+        total = round(sum(u for _, u in steps), 4)
+        return {"steps": steps, "usd": total, "credits": config.credits_for_usd(total), "build_mode": "assembly"}
+    steps = _estimate_steps(spec)
+    total = round(sum(u for _, u in steps), 4)
+    return {"steps": steps, "usd": total, "credits": config.credits_for_usd(total), "build_mode": "single"}
+
+
+def _estimate_steps(spec):
     steps = []
     seed_payload = {"texture_quality": "detailed", "geometry_quality": "detailed"}
     quad = config.SEED_QUAD if config.SEED_QUAD is not None else spec.category in config.HARD_SURFACE_CATEGORIES
@@ -221,8 +257,7 @@ def estimate(spec):
             steps.append(("added part %s: picture + seed" % part.get("name", "?"),
                           image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD + price(config.SEED_MODEL, seed_payload)))
     steps.append(("director chat overhead", 2 * LLM_CALL_ALLOWANCE_USD))
-    total = round(sum(u for _, u in steps), 4)
-    return {"steps": steps, "usd": total, "credits": config.credits_for_usd(total)}
+    return steps
 
 
 SEED_STEPS = ("3D seed", "extra views for multiview seeding", "hybrid repaint of the seed")
@@ -253,8 +288,7 @@ def estimate_rework(spec, mode="refinish"):
     """Worst case of finishing an EXISTING mesh: no main seed and no reference pictures (a retexture keeps the picture
     steps for its guide picture). The cockpit and part seeds the finish may still buy stay in (an imported A-10 cost
     $0.76 of cockpit against a 12-credit hold, 2026-09-23)."""
-    est = estimate(spec)
-    steps = [(name, usd) for name, usd in est["steps"]
+    steps = [(name, usd) for name, usd in _estimate_steps(spec)       # a rework finishes one mesh, never an assembly
              if not name.startswith(SEED_STEPS) and (mode == "retexture" or not name.startswith(PICTURE_STEPS))]
     usd = sum(u for _, u in steps)
     return {"steps": steps, "usd": round(usd, 4), "credits": config.credits_for_usd(usd)}

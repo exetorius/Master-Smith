@@ -220,6 +220,10 @@ def submit_build(user, spec_dict, seed=None, confirm_removal=False):
     if bad:
         return _refuse_paths(bad)
     spec = Spec.from_dict(spec_dict)
+    from .spec import assembly_wanted
+    if seed and assembly_wanted(spec) and not spec.remove_parts:
+        # an assembly is built from the approved pictures, never by re-finishing the chat's previous mesh
+        return _enqueue(user, spec, "build")
     if seed:
         same_shape = all(spec_dict.get(k) == seed["spec"].get(k) for k in ("description", "category", "style"))
         if (spec.seed_vendor or "tripo") != (seed["spec"].get("seed_vendor") or "tripo"):

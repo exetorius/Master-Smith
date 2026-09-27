@@ -32,10 +32,10 @@ def test_spec_defaults_by_category():
 
 
 def test_estimate_prices_rig_and_glass():
-    veh = pricing.estimate(Spec(name="J", description="x", category="vehicle"))
-    veh_rig = pricing.estimate(Spec(name="J", description="x", category="vehicle", rig=True))
+    veh = pricing.estimate(Spec(build_mode="single", name="J", description="x", category="vehicle"))
+    veh_rig = pricing.estimate(Spec(build_mode="single", name="J", description="x", category="vehicle", rig=True))
     assert veh_rig["usd"] - veh["usd"] >= pricing.price("fal-ai/hunyuan-3d/v3.1/part")
-    chara = pricing.estimate(Spec(name="O", description="x", category="character"))
+    chara = pricing.estimate(Spec(build_mode="single", name="O", description="x", category="character"))
     assert any("Meshy" in name for name, _ in chara["steps"])
     assert any("glass masks" in name for name, _ in veh["steps"])
     junk = Spec.from_dict({"name": "", "description": "", "category": "spaceship", "engine": "cryengine", "bogus": 1})
@@ -81,13 +81,13 @@ def test_weapon_glass_follows_the_caption():
 def test_part_seeds_need_a_hero_budget_or_an_ask_not_premium():
     from mastersmith.stages.parts import part_denied_by_brief, part_present
     steps = lambda s: [n for n, _ in pricing.estimate(s)["steps"]]              # noqa: E731
-    assert not any("separately seeded" in n for n in steps(Spec(name="R", description="rifle", category="weapon", premium=True)))
-    assert any("separately seeded" in n for n in steps(Spec(name="R", description="rifle", category="weapon", tri_budget=150000)))
-    assert any("separately seeded" in n for n in steps(Spec(name="R", description="rifle", category="weapon", part_seeds=[{"phrase": "x"}])))
-    bull = Spec(name="B", description="a bullpup carbine, no sling, no hands, no scope.", category="weapon")
+    assert not any("separately seeded" in n for n in steps(Spec(build_mode="single", name="R", description="rifle", category="weapon", premium=True)))
+    assert any("separately seeded" in n for n in steps(Spec(build_mode="single", name="R", description="rifle", category="weapon", tri_budget=150000)))
+    assert any("separately seeded" in n for n in steps(Spec(build_mode="single", name="R", description="rifle", category="weapon", part_seeds=[{"phrase": "x"}])))
+    bull = Spec(build_mode="single", name="B", description="a bullpup carbine, no sling, no hands, no scope.", category="weapon")
     assert part_denied_by_brief(bull, "the optic or scope mounted on top of the gun") == "scope"
     assert part_denied_by_brief(bull, "the detachable magazine of the gun") is None
-    assert part_denied_by_brief(Spec(name="B", description="a rifle without a magazine", category="weapon"), "the detachable magazine of the gun") == "magazine"
+    assert part_denied_by_brief(Spec(build_mode="single", name="B", description="a rifle without a magazine", category="weapon"), "the detachable magazine of the gun") == "magazine"
 
     class Llm:
         def __init__(self, answer):
@@ -109,6 +109,20 @@ def test_part_seeds_need_a_hero_budget_or_an_ask_not_premium():
     assert part_present(j, bull, {"name": "Magazine", "phrase": "the detachable magazine of the gun"}, "ref.png") is False
     assert j.llm.asked == 1 and "not seen on the reference" in j.lines[-1]
     assert part_present(Job('{"present": true, "confidence": 0.8}'), bull, {"name": "Magazine", "phrase": "the detachable magazine of the gun"}, "ref.png") is True
+
+
+def test_hard_surfaces_build_from_parts_unless_the_brief_says_single():
+    from mastersmith.spec import assembly_wanted
+    w = Spec(name="B", description="a bullpup carbine, no scope", category="weapon")
+    assert assembly_wanted(w) and pricing.estimate(w)["build_mode"] == "assembly"
+    names = [n for n, _ in pricing.estimate(w)["steps"]]
+    assert any(n.startswith("parts plan") for n in names) and not any(n.startswith("3D seed") for n in names)
+    assert not assembly_wanted(Spec(name="B", description="x", category="weapon", build_mode="single"))
+    assert not assembly_wanted(Spec(name="C", description="a crate", category="prop"))
+    assert assembly_wanted(Spec(name="C", description="a crate", category="prop", build_mode="assembly"))
+    assert Spec(name="B", description="x", build_mode="nonsense").build_mode is None
+    rw = pricing.estimate_rework(w)                         # a re-finish is one mesh: no plan, no parts
+    assert not any(n.startswith(("parts plan", "code parts")) for n, _ in rw["steps"])
 
 
 def test_hi3d_multiview_fills_its_named_slots_from_our_view_list():
@@ -147,7 +161,7 @@ def test_wallet_keeps_score_of_spend_and_never_refuses():
 
 
 def test_rework_estimate_drops_the_seed_but_keeps_the_cockpit():
-    jet = Spec(name="Jet", description="grey attack jet", category="aircraft", size_m=-1, cockpit=True)
+    jet = Spec(build_mode="single", name="Jet", description="grey attack jet", category="aircraft", size_m=-1, cockpit=True)
     full = pricing.estimate(jet)
     re = pricing.estimate_rework(jet, "refinish")
     names = [n for n, _ in re["steps"]]
@@ -155,7 +169,7 @@ def test_rework_estimate_drops_the_seed_but_keeps_the_cockpit():
     assert not any(n.startswith(pricing.PICTURE_STEPS) for n in names)
     assert any(n.startswith("cockpit") for n in names)
     assert 0 < re["usd"] < full["usd"]
-    rt = pricing.estimate_rework(Spec(name="R", description="rifle", category="weapon", retexture=True), "retexture")
+    rt = pricing.estimate_rework(Spec(build_mode="single", name="R", description="rifle", category="weapon", retexture=True), "retexture")
     assert any("repaint of the existing mesh" in n for n, _ in rt["steps"])
 
 
@@ -322,10 +336,10 @@ def test_repaint_mode_and_estimate():
     from mastersmith.stages.repaint import fit_to_render
     import numpy as np
     from PIL import Image
-    assert pricing.repaint_mode(Spec(name="A", description="x")) in ("meshy", "pictures")
-    assert pricing.repaint_mode(Spec(name="A", description="x", repaint="pictures")) == "pictures"
-    a = pricing.estimate(Spec(name="A", description="x", category="weapon", hybrid=True, repaint="meshy"))
-    b = pricing.estimate(Spec(name="A", description="x", category="weapon", hybrid=True, repaint="pictures"))
+    assert pricing.repaint_mode(Spec(build_mode="single", name="A", description="x")) in ("meshy", "pictures")
+    assert pricing.repaint_mode(Spec(build_mode="single", name="A", description="x", repaint="pictures")) == "pictures"
+    a = pricing.estimate(Spec(build_mode="single", name="A", description="x", category="weapon", hybrid=True, repaint="meshy"))
+    b = pricing.estimate(Spec(build_mode="single", name="A", description="x", category="weapon", hybrid=True, repaint="pictures"))
     assert any("Meshy retexture" in n for n, _ in a["steps"]) and any("picture model" in n for n, _ in b["steps"])
     with tempfile.TemporaryDirectory() as d:
         ren = np.full((200, 200, 3), 140, np.uint8)
@@ -380,7 +394,7 @@ def test_cockpit_tub_is_opt_in():
 
 
 def test_reference_estimates_split_the_picture_stage():
-    jet = Spec(name="Jet", description="grey jet", category="aircraft")
+    jet = Spec(build_mode="single", name="Jet", description="grey jet", category="aircraft")
     full, pics, rest = pricing.estimate(jet), pricing.estimate_reference(jet), pricing.estimate_after_reference(jet)
     assert 0 < pics["usd"] < full["usd"] and 0 < rest["usd"] < full["usd"]
     assert any(n.startswith("extra views") for n, _ in pics["steps"]) and not any(n.startswith("3D seed") for n, _ in pics["steps"])
@@ -413,13 +427,13 @@ def test_remove_parts_are_normalised_phrases():
 def test_estimate_prices_the_chosen_mesh_vendor():
     cat = {v["key"]: v for v in pricing.vendor_catalogue()}
     assert cat["tripo"]["usd"] == 0.6 and cat["hitem3d3"]["usd"] == 2.1 and cat["hitem3d3mv"]["usd"] == 2.1 and cat["hitem3d3mv"]["multiview"]
-    default = pricing.estimate(Spec(name="R", description="rifle", category="weapon"))
-    dear = pricing.estimate(Spec(name="R", description="rifle", category="weapon", seed_vendor="hitem3d3"))
+    default = pricing.estimate(Spec(build_mode="single", name="R", description="rifle", category="weapon"))
+    dear = pricing.estimate(Spec(build_mode="single", name="R", description="rifle", category="weapon", seed_vendor="hitem3d3"))
     assert any(n.startswith("3D seed (Tripo") for n, _ in default["steps"])
     assert any(n == "3D seed (Hitem3D v3 (2048))" for n, _ in dear["steps"]) and dear["usd"] > default["usd"]
-    mv = pricing.estimate(Spec(name="R", description="rifle", category="weapon", seed_vendor="hitem3d3mv"))
+    mv = pricing.estimate(Spec(build_mode="single", name="R", description="rifle", category="weapon", seed_vendor="hitem3d3mv"))
     assert any(n == "3D seed (Hitem3D v3 multi-view (2048))" for n, _ in mv["steps"]) and mv["usd"] == dear["usd"]
-    assert pricing.seed_vendor(Spec(name="R", description="r", seed_vendor="nonsense"))["key"] == "tripo"
+    assert pricing.seed_vendor(Spec(build_mode="single", name="R", description="r", seed_vendor="nonsense"))["key"] == "tripo"
 
 
 def test_removal_overlay_tints_the_mask_and_reports_coverage(tmp_path):
@@ -558,14 +572,14 @@ def test_single_picture_counts_only_when_the_customer_asked():
 
 def test_add_parts_are_normalised_and_priced():
     from mastersmith.spec import PLACEMENTS
-    s = Spec(name="Havoc", description="police gunship", category="aircraft",
+    s = Spec(build_mode="single", name="Havoc", description="police gunship", category="aircraft",
              add_parts=[{"name": "Cockpit interior", "phrase": "the cockpit interior: seat, panel, consoles", "anchor": "glass", "place": "inside", "size_m": "2.2"},
                         {"phrase": "a 4x scope", "anchor": "the top rail", "place": "sideways"}, {"name": "x"}, "junk"])
     assert [p["name"] for p in s.add_parts] == ["Cockpitinterior", "scope"]
     assert s.add_parts[0]["size_m"] == 2.2 and s.add_parts[0]["anchor"] == "glass"
     assert s.add_parts[1]["place"] == "inside" and s.add_parts[1]["anchor"] == "the top rail"   # an unknown placement falls back
     assert set(PLACEMENTS) == {"inside", "on_top", "in_front", "behind", "below"}
-    plain = Spec(name="Havoc", description="police gunship", category="aircraft")
+    plain = Spec(build_mode="single", name="Havoc", description="police gunship", category="aircraft")
     with_part = pricing.estimate(s)
     assert any(n.startswith("added part Cockpitinterior") for n, _ in with_part["steps"]) and with_part["usd"] > pricing.estimate(plain)["usd"]
     rw = pricing.estimate_rework(s, "refinish")
@@ -573,7 +587,7 @@ def test_add_parts_are_normalised_and_priced():
 
 
 def test_add_parts_keep_a_bought_seed_and_price_it_as_a_fit():
-    s = Spec(name="Havoc", description="gunship", category="aircraft",
+    s = Spec(build_mode="single", name="Havoc", description="gunship", category="aircraft",
              add_parts=[{"name": "CockpitInterior", "phrase": "the cockpit interior", "anchor": "glass", "seed": "/x/part_CockpitInterior_seed.fbx"}])
     assert s.add_parts[0]["seed"] == "/x/part_CockpitInterior_seed.fbx"
     steps = dict(pricing.estimate(s)["steps"])

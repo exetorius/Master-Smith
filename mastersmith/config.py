@@ -49,6 +49,11 @@ CORS_ORIGINS = [o.strip() for o in os.environ.get(
 DIRECTOR_MODEL = os.environ.get("MASTERSMITH_DIRECTOR_MODEL", "google/gemini-3.8-flash")
 VISION_MODEL = os.environ.get("MASTERSMITH_VISION_MODEL", "google/gemini-3.8-flash")
 PREMIUM_MODEL = os.environ.get("MASTERSMITH_PREMIUM_MODEL", "anthropic/claude-sonnet-5")
+# Assembly builds (docs/ASSEMBLY.md): the builder plans the parts, writes the code parts and checks the assembly.
+BUILDER_MODEL = os.environ.get("MASTERSMITH_BUILDER_MODEL", "anthropic/claude-opus-5.5")
+ASSEMBLY_MAX_PARTS = int(os.environ.get("MASTERSMITH_ASSEMBLY_MAX_PARTS", "24"))
+ASSEMBLY_WORKERS = int(os.environ.get("MASTERSMITH_ASSEMBLY_WORKERS", "4"))
+ASSEMBLY_CHECK_ROUNDS = int(os.environ.get("MASTERSMITH_ASSEMBLY_CHECK_ROUNDS", "2"))
 # The director models the chat offers (OpenRouter ids; every one must support tools). DIRECTOR_MODEL is the default
 # and always listed first; the UI can also show every tool-and-vision-capable model OpenRouter serves.
 DIRECTOR_MODELS = [m.strip() for m in os.environ.get(
