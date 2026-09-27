@@ -241,6 +241,26 @@ def contacts(part, parts, dims):
     return out
 
 
+def inside(part, parts):
+    """The smaller parts whose boxes lie mostly (over half their volume) inside this part's box: they are modelled
+    separately and sit in or on it. The bullpup's olive handguard panel was planned as its own part and the handguard,
+    not told, closed its surface over it (2026-09-27)."""
+    a0, a1 = part["box_min"], part["box_max"]
+    va = max(1e-12, (a1[0] - a0[0]) * (a1[1] - a0[1]) * (a1[2] - a0[2]))
+    out = []
+    for q in parts:
+        if q is part or q["name"] == part["name"]:
+            continue
+        b0, b1 = q["box_min"], q["box_max"]
+        vb = max(1e-12, (b1[0] - b0[0]) * (b1[1] - b0[1]) * (b1[2] - b0[2]))
+        over = 1.0
+        for i in range(3):
+            over *= max(0.0, min(a1[i], b1[i]) - max(a0[i], b0[i]))
+        if vb < va and over > 0.5 * vb:
+            out.append(q["name"])
+    return out
+
+
 def _size(part):
     return [round(part["box_max"][i] - part["box_min"][i], 5) for i in range(3)]
 
@@ -273,6 +293,11 @@ def build_code_part(job, spec, part, plan):
         # parts are built one at a time: the pistol's trigger guard and grip stopped short of the frame (2026-09-27)
         prompt += ("\n\nWhere it joins: %s. At each of those faces the part must reach the edge of its box, solidly, so it "
                    "closes against the neighbour with no gap (an open loop's top, a grip's upper end, a bracket's foot)." % "; ".join(joins))
+    within = inside(part, plan["parts"])
+    if within:
+        prompt += ("\n\nModelled separately, sitting in or on this part: %s. Do NOT model them; where one is inset "
+                   "(a panel, a lever in a slot, a barrel through a shroud) leave the recess, slot or bore it sits in."
+                   % ", ".join(within))
     if front_mm is None:
         prompt = prompt.replace("Picture 2: the same from the FRONT (the part's left on the right of the picture): y across, z up, millimetres.\nPicture 3:",
                                 "There is no front picture: shape the cross-section (y) from the description and how such a part is made.\nPicture 2:")

@@ -262,6 +262,36 @@ def tint_to_plan(o, colour):
     return done
 
 
+def surface_to_plan(o, mat):
+    """A vendor part takes its planned roughness and metalness too: Tripo's maps made the bullpup's polymer body shine
+    like metal (2026-09-27). The texture's roughness variation is kept, squeezed into planned +-0.1."""
+    if "roughness" not in mat and "metal" not in mat:
+        return False
+    for m in {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}:
+        t = m.node_tree
+        b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if b is None:
+            continue
+        if "metal" in mat:
+            for l in list(b.inputs["Metallic"].links):
+                t.links.remove(l)
+            b.inputs["Metallic"].default_value = 1.0 if mat.get("metal") else 0.0
+        if "roughness" in mat:
+            r = min(1.0, max(0.05, float(mat["roughness"])))
+            inp = b.inputs["Roughness"]
+            if inp.is_linked:
+                src = inp.links[0].from_socket
+                mr = t.nodes.new("ShaderNodeMapRange")
+                mr.clamp = True
+                mr.inputs["To Min"].default_value = max(0.05, r - 0.1)
+                mr.inputs["To Max"].default_value = min(1.0, r + 0.1)
+                t.links.new(src, mr.inputs["Value"])
+                t.links.new(mr.outputs["Result"], inp)
+            else:
+                inp.default_value = r
+    return True
+
+
 # ---------------------------------------------------------------- parts in their boxes
 bpy.ops.wm.read_factory_settings(use_empty=True)
 parts, glass_parts = [], []
@@ -273,6 +303,7 @@ for p in args["parts"]:
         rec["reference_detail"] = add_reference_detail(o, args["detail"])
     if p["kind"] == "vendor" and not (p.get("material") or {}).get("glass") and args.get("tint_vendor", True):
         rec["tinted"] = tint_to_plan(o, (p.get("material") or {}).get("color"))
+        rec["surface_planned"] = surface_to_plan(o, p.get("material") or {})
     for slot in o.material_slots:
         if slot.material:
             slot.material.name = "MS_src_%s_%s" % (p["name"], slot.material.name)
