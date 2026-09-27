@@ -284,6 +284,22 @@ class Kit:
         obj.data.transform(m)
         return obj
 
+    # the builder reaches for other libraries' names; these are the same calls
+    def translate(self, obj, offset):
+        return self.move(obj, offset)
+
+    def difference(self, target, *cutters):
+        return self.cut(target, *cutters)
+
+    subtract = difference
+
+    def extrude(self, points, width=None, offset=0.0, plane="XZ", bevel=None, name="profile"):
+        return self.profile(points, width, offset, plane, bevel, name)
+
+    def __getattr__(self, name):
+        raise KitError("kit.%s does not exist. The calls are: box, cylinder, tube, profile, cut, union, hole, slot, array, "
+                       "mirror, move, rotate, join" % name)
+
     def join(self, *objs):
         objs = [self._check(o) for o in objs]
         if not objs:
