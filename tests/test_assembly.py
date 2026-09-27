@@ -25,6 +25,20 @@ GOOD = '''def build(kit, L, W, H):
 
 def test_part_code_allowlist_accepts_kit_code():
     codecheck.check_code(GOOD)
+    # what the builder writes naturally: a helper, a lambda, an "is not None" test
+    codecheck.check_code(HELPERS)
+
+
+HELPERS = '''def build(kit, L, W, H):
+    def rib(x):
+        return kit.box((x, 0, 0), (L * 0.02, W, H))
+    f = lambda v: v * 0.5
+    parts = [rib(f(x)) for x in (0, L / 4)]
+    extra = None
+    if extra is not None:
+        parts.append(extra)
+    return parts
+'''
 
 
 @pytest.mark.parametrize("code, why", [
@@ -38,7 +52,8 @@ def test_part_code_allowlist_accepts_kit_code():
     ("def build(kit, L, W, H):\n    x = kit.box()\n    return x.data", "only kit.* and math.*"),
     ("def build(kit, L, W, H):\n    return eval('1')", "unknown name eval"),
     ("def build(kit, L, W):\n    return kit.box()", "signature"),
-    ("def build(kit, L, W, H):\n    def inner():\n        return 1\n    return kit.box()", "nested functions"),
+    ("def build(kit, L, W, H):\n    def _inner():\n        return 1\n    return kit.box()", "private"),
+    ("def build(kit, L, W, H):\n    class A:\n        pass\n    return kit.box()", "ClassDef is not allowed"),
 ])
 def test_part_code_allowlist_refuses_escapes(code, why):
     with pytest.raises(codecheck.CodeRejected) as exc:

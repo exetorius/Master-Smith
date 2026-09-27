@@ -15,6 +15,7 @@ ALLOWED_NODES = (
     ast.Call, ast.keyword, ast.Name, ast.Load, ast.Store, ast.Attribute, ast.Constant, ast.Tuple, ast.List, ast.Dict,
     ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare, ast.If, ast.IfExp, ast.For, ast.Subscript, ast.Slice,
     ast.ListComp, ast.GeneratorExp, ast.comprehension, ast.Starred, ast.Pass, ast.Break, ast.Continue,
+    ast.Lambda, ast.Is, ast.IsNot, ast.DictComp, ast.SetComp, ast.JoinedStr, ast.FormattedValue, ast.Set,
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow, ast.USub, ast.UAdd, ast.Not, ast.And, ast.Or,
     ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
 )
@@ -46,11 +47,13 @@ def check_code(source):
             assigned.add(node.id)
         elif isinstance(node, ast.arg):
             assigned.add(node.arg)
+        elif isinstance(node, ast.FunctionDef) and node is not funcs[0]:
+            assigned.add(node.name)          # a helper the builder defines inside build()
     for node in ast.walk(tree):
         if not isinstance(node, ALLOWED_NODES):
             raise CodeRejected("%s is not allowed in part code (line %s)" % (type(node).__name__, getattr(node, "lineno", "?")))
-        if isinstance(node, ast.FunctionDef) and node is not funcs[0]:
-            raise CodeRejected("nested functions are not allowed (line %s)" % node.lineno)
+        if isinstance(node, ast.FunctionDef) and node is not funcs[0] and (node.decorator_list or node.name.startswith("_")):
+            raise CodeRejected("helper functions may not be decorated or private (line %s)" % node.lineno)
         if isinstance(node, ast.Attribute):
             if node.attr.startswith("_"):
                 raise CodeRejected("private attribute %s (line %s)" % (node.attr, node.lineno))
@@ -80,7 +83,9 @@ Calls (every length in metres; sizes are full sizes, not half sizes):
   kit.profile(points, width, offset=0.0, plane="XZ", bevel=None)   closed outline extruded: XZ points (x, z) extruded
         across Y by width; XY points (x, y) extruded up Z; YZ points (y, z) extruded along X. Points go around the
         outline once, no self-crossing; concave outlines are fine (a trigger guard, a stock, a sight blade)
-  kit.cut(target, *cutters)                                 boolean difference; the cutters are consumed
+  kit.cut(target, *cutters)                                 boolean difference; the cutters are consumed. A cut that
+        removes most of the target is refused with an error
+  kit.union(target, *others)                                boolean union into one closed shell
   kit.hole(target, center, radius, depth, axis="Y")         round hole through
   kit.slot(target, center, size)                            box-shaped cut
   kit.array(piece, count, offset)                           count copies, each offset (dx, dy, dz) further; joined

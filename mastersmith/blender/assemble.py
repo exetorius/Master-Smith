@@ -259,8 +259,10 @@ px[:, :, 0] = np.clip(0.35 + 0.65 * pixels(ao)[:, :, 0], 0, 1)          # contac
 px[:, :, 1] = pixels(rough)[:, :, 0]
 px[:, :, 2] = pixels(metal)[:, :, 0]
 orm.pixels.foreach_set(px.ravel())
-report["roughness_mean"] = round(float(px[:, :, 1].mean()), 3)
-report["metallic_mean"] = round(float(px[:, :, 2].mean()), 3)
+covered = pixels(ao)[:, :, 0] > 0.001            # texels a part landed on; the empty atlas is not the surface
+report["roughness_mean"] = round(float(px[:, :, 1][covered].mean()), 3) if covered.any() else None
+report["metallic_mean"] = round(float(px[:, :, 2][covered].mean()), 3) if covered.any() else None
+report["atlas_coverage"] = round(float(covered.mean()), 3)
 for img, tag in ((bc, "BC"), (normal, "N"), (orm, "ORM")):
     img.filepath_raw = os.path.join(OUT, "T_%s_%s.png" % (NAME, tag))
     img.file_format = "PNG"
@@ -298,7 +300,8 @@ for o, r in glass_parts:
     bpy.context.view_layer.objects.active = lod0
     bpy.ops.object.join()
 report["glass"] = {"parts": [r["name"] for _o, r in glass_parts]} if glass_parts else None
-log("atlas %d baked: roughness %.2f, metallic %.2f" % (size, report["roughness_mean"], report["metallic_mean"]))
+log("atlas %d baked: roughness %s, metallic %s, %.0f%% of the atlas used" % (size, report["roughness_mean"], report["metallic_mean"],
+                                                                         report["atlas_coverage"] * 100))
 
 # ---------------------------------------------------------------- LODs, collision, sockets
 lo, hi = blib.dims(lod0)
@@ -364,6 +367,7 @@ if (args.get("spec") or {}).get("category") == "weapon":
 
 # ---------------------------------------------------------------- renders: previews, detail views, the check views
 blib.setup_render(int(args.get("render_size", 768)), 48, look="preview")
+scn.view_settings.exposure = -0.4        # a medium-grey polymer read nearly white under the studio light (2026-09-27)
 stage = blib.Stage(lod0, extra_hidden=[hull, lod1, lod2])
 report["renders"] = [stage.render(v, os.path.join(OUT, "preview_%s.png" % v))["file"] for v in ("iso", "side", "front")]
 stage.close()

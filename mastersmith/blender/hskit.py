@@ -180,19 +180,64 @@ class Kit:
         return self._bevel(self._link(bm, name), bevel, smallest)
 
     # ------------------------------------------------------------------ operations
+    @staticmethod
+    def _extent(o):
+        if not len(o.data.vertices):
+            return 0.0, 0
+        xs = [v.co for v in o.data.vertices]
+        lo = Vector((min(v.x for v in xs), min(v.y for v in xs), min(v.z for v in xs)))
+        hi = Vector((max(v.x for v in xs), max(v.y for v in xs), max(v.z for v in xs)))
+        e = hi - lo
+        return e.x * e.y * e.z, len(o.data.polygons)
+
     def cut(self, target, *cutters):
+        """Boolean difference, one cutter at a time. Cutters may be pieces joined together even when they overlap
+        (exact solver with self-intersection on). A cut that empties the target or shrinks its bounds to under half
+        is undone and reported: a cutter that swallows the part is a mistake, not a design (the bullpup handguard's
+        joined slot cutters erased the whole shroud, 2026-09-27)."""
         self._check(target)
-        for c in cutters:
+        for k, c in enumerate(cutters):
             self._check(c)
+            before_mesh = target.data.copy()
+            vol0, _f0 = self._extent(target)
             m = target.modifiers.new("cut", "BOOLEAN")
             m.operation = "DIFFERENCE"
             m.solver = "EXACT"
+            m.use_self = True
+            m.use_hole_tolerant = True
             m.object = c
             c.hide_render = True
             c.hide_set(True)
             self._apply(target, m)
             self.made.remove(c)
             bpy.data.objects.remove(c, do_unlink=True)
+            vol1, f1 = self._extent(target)
+            if f1 == 0 or (vol0 > 0 and vol1 < vol0 * 0.5):
+                broken = target.data
+                target.data = before_mesh
+                bpy.data.meshes.remove(broken)
+                raise KitError("cut number %d removed most of %s (its bounds fell to %.0f%%): make each cutter a closed "
+                               "solid that overlaps only what it should remove" % (k + 1, target.name,
+                                                                                  100.0 * vol1 / max(vol0, 1e-12)))
+            bpy.data.meshes.remove(before_mesh)
+        return target
+
+    def union(self, target, *others):
+        """Boolean union into one closed shell (for cutters built from several pieces, or solid features)."""
+        self._check(target)
+        for o in others:
+            self._check(o)
+            m = target.modifiers.new("union", "BOOLEAN")
+            m.operation = "UNION"
+            m.solver = "EXACT"
+            m.use_self = True
+            m.use_hole_tolerant = True
+            m.object = o
+            o.hide_render = True
+            o.hide_set(True)
+            self._apply(target, m)
+            self.made.remove(o)
+            bpy.data.objects.remove(o, do_unlink=True)
         return target
 
     def hole(self, target, center, radius, depth, axis="Y", sides=24):

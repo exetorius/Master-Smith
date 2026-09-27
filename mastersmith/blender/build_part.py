@@ -12,7 +12,7 @@ import traceback
 
 import bmesh
 import bpy
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blib  # noqa: E402
@@ -44,13 +44,67 @@ def hex_rgb(h):
 
 
 def make_material(spec):
+    """The planned colour, metal and roughness, with the variation a real surface has: a fine noise in the roughness
+    (+-0.07) and a faint one in the colour (+-4% value), and worn, lighter edges on metal (Cycles pointiness, so the
+    assembly's bake keeps them). A flat fill read as 'untextured shader fills' to the reviewer (2026-09-27)."""
     spec = spec or {}
     mat = bpy.data.materials.new("MI_part_%s" % NAME)
-    bsdf = next(n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
-    bsdf.inputs["Base Color"].default_value = (*hex_rgb(spec.get("color")), 1.0)
-    bsdf.inputs["Metallic"].default_value = 1.0 if spec.get("metal") else 0.0
-    bsdf.inputs["Roughness"].default_value = float(spec.get("roughness", 0.6))
+    nt = mat.node_tree
+    bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
+    base = hex_rgb(spec.get("color"))
+    rough = float(spec.get("roughness", 0.6))
+    metal = bool(spec.get("metal"))
+    bsdf.inputs["Metallic"].default_value = 1.0 if metal else 0.0
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    noise = nt.nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 180.0                  # object space, metres: grain of a few millimetres
+    noise.inputs["Detail"].default_value = 6.0
+    nt.links.new(coord.outputs["Object"], noise.inputs["Vector"])
+    r_map = nt.nodes.new("ShaderNodeMapRange")
+    r_map.inputs["To Min"].default_value = max(0.05, rough - 0.07)
+    r_map.inputs["To Max"].default_value = min(1.0, rough + 0.07)
+    nt.links.new(noise.outputs["Fac"], r_map.inputs["Value"])
+    nt.links.new(r_map.outputs["Result"], bsdf.inputs["Roughness"])
+    c_mix = nt.nodes.new("ShaderNodeMix")
+    c_mix.data_type = "RGBA"
+    c_mix.inputs["A"].default_value = (*[c * 0.96 for c in base], 1.0)
+    c_mix.inputs["B"].default_value = (*[min(1.0, c * 1.04) for c in base], 1.0)
+    nt.links.new(noise.outputs["Fac"], c_mix.inputs["Factor"])
+    colour = c_mix.outputs["Result"]
+    if metal:
+        geo = nt.nodes.new("ShaderNodeNewGeometry")
+        edge = nt.nodes.new("ShaderNodeMapRange")
+        edge.inputs["From Min"].default_value = 0.52
+        edge.inputs["From Max"].default_value = 0.62
+        nt.links.new(geo.outputs["Pointiness"], edge.inputs["Value"])
+        wear = nt.nodes.new("ShaderNodeMix")
+        wear.data_type = "RGBA"
+        nt.links.new(edge.outputs["Result"], wear.inputs["Factor"])
+        nt.links.new(colour, wear.inputs["A"])
+        wear.inputs["B"].default_value = (*[min(1.0, c * 1.6 + 0.04) for c in base], 1.0)
+        colour = wear.outputs["Result"]
+    nt.links.new(colour, bsdf.inputs["Base Color"])
     return mat
+
+
+def box_render(part, view, path, size):
+    """Orthographic, framed on the part's BOX (not on what was built), on transparent film: laid next to the reference
+    cropped to the same box, any misfit in outline or proportion shows at once."""
+    lo, hi = Vector((-L / 2, -W / 2, -H / 2)), Vector((L / 2, W / 2, H / 2))
+    scn = bpy.context.scene
+    cam = bpy.data.objects.new("BoxCam", bpy.data.cameras.new("BoxCam"))
+    bpy.context.collection.objects.link(cam)
+    scn.camera = cam
+    blib.ortho_camera(cam, view, lo, hi, margin=1.0)
+    scn.render.resolution_x = scn.render.resolution_y = size
+    scn.render.film_transparent = True
+    scn.render.image_settings.color_mode = "RGBA"
+    scn.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+    scn.render.film_transparent = False
+    scn.render.image_settings.color_mode = "RGB"
+    bpy.data.objects.remove(cam, do_unlink=True)
+    return os.path.basename(path)
 
 
 def finish(o):
@@ -126,6 +180,9 @@ try:
     result["renders"] = {v: stage.render(v, os.path.join(OUT, "%s_%s.png" % (NAME, name)))["file"]
                          for v, name in (("side", "side"), ("front", "front"), ("iso", "iso"))}
     stage.close()
+    blib.setup_render(int(args.get("render_size", 512)), 16, look="probe")
+    result["box_renders"] = {v: box_render(part, v, os.path.join(OUT, "%s_box_%s.png" % (NAME, v)), int(args.get("render_size", 512)))
+                             for v in ("left", "front")}
     result["ok"] = True
 except (codecheck.CodeRejected, KitError) as exc:
     result["error"] = str(exc)

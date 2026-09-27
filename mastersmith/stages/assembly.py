@@ -23,9 +23,16 @@ The whole object: {description}
 This part: {name} - {what}
 Its box is L={L_mm:.1f} mm long (x), W={W_mm:.1f} mm wide (y), H={H_mm:.1f} mm tall (z).
 
-Picture 1 is the part as seen from the SIDE (forward is to the RIGHT); picture 2 as seen from the FRONT. The blue
-rectangle in each is exactly the part's box; model what is inside it. Match the outline, the proportions, every
-visible hole, slot, groove, step and chamfer. Crisp hard-surface geometry, nothing melted or blobby.
+Picture 1: the part's box from the SIDE (forward to the RIGHT, up is up), cropped exactly to the box and centred on a
+square, with a scale in millimetres from the part's centre: read positions off it (x across, z up).
+Picture 2: the same from the FRONT (the part's left on the right of the picture): y across, z up, millimetres.
+Picture 3: the part in context with its neighbours, its box in blue.
+Model what is inside the box at the level of detail the reference shows: the outline, the proportions and every
+visible hole, slot, groove, recess, raised panel, step, facet and chamfer. A plain slab where the reference has
+recesses and facets is wrong. Large parts carry most of the object's look: build them in layers (the main outline,
+then raised panels and bosses, then recesses and cuts, then small features). Crisp hard-surface geometry, nothing
+melted or blobby. A cutter must be one closed solid: for a rounded slot, kit.union a box and two end cylinders into
+one cutter first.
 
 The kit:
 {kit}
@@ -36,10 +43,14 @@ def build(kit, L, W, H):
     return [pieces]
 Use only kit.*, math.* and the numbers L, W, H (metres). No imports. Answer with the code in one ```python block."""
 
-REFINE_PROMPT = """Here is what your code built for {name} ({what}): pictures 3 and 4 are renders of the built part from
-the side and the front, next to the reference crops (pictures 1 and 2, the blue box is the part). Compare outline,
-proportions, holes, slots and steps.
-If it matches well, answer with the single word OK. Otherwise answer with the corrected complete function in one
+REFINE_PROMPT = """The picture compares what your code built for {name} ({what}) with the reference. Top row: the SIDE,
+bottom row: the FRONT. In each row the LEFT is the reference cropped to the part's box and the RIGHT is your build
+rendered orthographically in the same box, same scale, same framing - so they should line up. In the FRONT
+reference, parts in front of this one (a barrel, a muzzle device) can hide it; judge what is visible.
+Be critical. Answer OK only if every major shape, opening, recess and step is there and the outline matches the
+reference within a few percent of the box. A missing section, a wrong outline, a part that does not fill its box
+like the reference does, or a plain slab where the reference has recesses and facets is NOT OK.
+If it is not OK, first list in one or two lines what is wrong, then give the corrected complete function in one
 ```python block. Your previous code:
 ```python
 {code}
@@ -79,6 +90,69 @@ def _crop_part(src, box_pct, dst, margin=0.18):
     return dst
 
 
+def _box_square(src, box_pct, dst, size=512):
+    """The reference cropped EXACTLY to a box (percent of a silhouette-cropped picture) and centred on a white square,
+    the framing the part's orthographic box renders use (the longer side of the box fills the square)."""
+    im = Image.open(src).convert("RGB")
+    w, h = im.size
+    x0, x1, y0, y1 = box_pct
+    crop = im.crop((int(x0 / 100 * w), int(y0 / 100 * h), max(int(x0 / 100 * w) + 1, int(x1 / 100 * w)),
+                    max(int(y0 / 100 * h) + 1, int(y1 / 100 * h))))
+    s = size / float(max(crop.size))
+    crop = crop.resize((max(1, round(crop.width * s)), max(1, round(crop.height * s))), Image.LANCZOS)
+    sq = Image.new("RGB", (size, size), (255, 255, 255))
+    sq.paste(crop, ((size - crop.width) // 2, (size - crop.height) // 2))
+    sq.save(dst)
+    return dst
+
+
+def _mm_scale(src, dst, span_m, axes):
+    """Tick marks every tenth of the square with millimetre labels from the centre: `span_m` is the side of the square
+    in metres, `axes` the two axis names ("x", "z")."""
+    from PIL import ImageDraw, ImageFont
+    im = Image.open(src).convert("RGB")
+    s = im.width
+    pad = 40
+    out = Image.new("RGB", (s + pad, s + pad), (255, 255, 255))
+    out.paste(im, (pad, 0))
+    d = ImageDraw.Draw(out)
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 11)
+    except OSError:
+        font = ImageFont.load_default()
+    for i in range(11):
+        t = i / 10.0
+        mm = (t - 0.5) * span_m * 1000
+        x = pad + t * s
+        y = s - t * s
+        d.line([(x, s), (x, s + 8)], fill=(200, 0, 0), width=1)
+        d.line([(pad - 8, y), (pad, y)], fill=(200, 0, 0), width=1)
+        d.line([(x, 0), (x, s)], fill=(230, 120, 120), width=1) if i in (0, 5, 10) else None
+        d.line([(pad, y), (pad + s, y)], fill=(230, 120, 120), width=1) if i in (0, 5, 10) else None
+        if i % 2 == 0:
+            d.text((x - 12, s + 10), "%+.0f" % mm, fill=(200, 0, 0), font=font)
+            d.text((1, y - 6), "%+.0f" % mm, fill=(200, 0, 0), font=font)
+    d.text((pad + s - 60, s + 26), "%s mm" % axes[0], fill=(0, 0, 0), font=font)
+    d.text((2, 2), "%s mm" % axes[1], fill=(0, 0, 0), font=font)
+    out.save(dst)
+    return dst
+
+
+def _compare(pairs, dst):
+    """Rows of [reference square | build render on white], each 384 px."""
+    tile = 384
+    out = Image.new("RGB", (tile * 2 + 12, tile * len(pairs) + 6 * (len(pairs) - 1)), (255, 255, 255))
+    for r, (ref, render) in enumerate(pairs):
+        a = Image.open(ref).convert("RGB").resize((tile, tile), Image.LANCZOS)
+        b = Image.open(render).convert("RGBA").resize((tile, tile), Image.LANCZOS)
+        white = Image.new("RGBA", b.size, (255, 255, 255, 255))
+        b = Image.alpha_composite(white, b).convert("RGB")
+        out.paste(a, (0, r * (tile + 6)))
+        out.paste(b, (tile + 12, r * (tile + 6)))
+    out.save(dst)
+    return dst
+
+
 def _size(part):
     return [round(part["box_max"][i] - part["box_min"][i], 5) for i in range(3)]
 
@@ -90,14 +164,22 @@ def build_code_part(job, spec, part, plan):
     out_dir = os.path.join(job.work_dir, "parts", name)
     os.makedirs(out_dir, exist_ok=True)
     side_crop = _crop_part(plan["side"], part["side_box"][:2] + part["side_box"][2:], os.path.join(out_dir, "ref_side.png"))
-    front_crop = _crop_part(plan["front"], part["front_span"] + [0, 100], os.path.join(out_dir, "ref_front.png"))
     L, W, H = _size(part)
+    zt, zb = part["side_box"][2], part["side_box"][3]
+    side_sq = _box_square(plan["side"], part["side_box"], os.path.join(out_dir, "box_side.png"))
+    front_sq = _box_square(plan["front"], part["front_span"] + [zt, zb], os.path.join(out_dir, "box_front.png"))
+    side_mm = _mm_scale(side_sq, os.path.join(out_dir, "box_side_mm.png"), max(L, H), ("x", "z"))
+    front_mm = _mm_scale(front_sq, os.path.join(out_dir, "box_front_mm.png"), max(W, H), ("y", "z"))
+    dims = plan.get("dims_m") or [L, W, H]
+    big = L > 0.25 * dims[0] or H > 0.35 * dims[2]           # a housing or stock carries the look: think harder
+    effort = "high" if big else "medium"
     prompt = CODE_PROMPT.format(category=spec.category, description=spec.description[:600], name=name, what=part["what"],
                                 L_mm=L * 1000, W_mm=W * 1000, H_mm=H * 1000, kit=codecheck.KIT_DOC)
-    messages = [{"role": "user", "content": [{"type": "text", "text": prompt}] + _images([side_crop, front_crop])}]
+    messages = [{"role": "user", "content": [{"type": "text", "text": prompt}] + _images([side_mm, front_mm, side_crop])}]
     best, code = None, None
     for attempt in range(3):
-        reply = job.llm.chat(messages, model=config.BUILDER_MODEL, max_tokens=6000, temperature=0.2, effort="medium")
+        reply = job.llm.chat(messages, model=config.BUILDER_MODEL, max_tokens=12000 if big else 8000, temperature=0.2,
+                             effort=effort)
         code = _code_from(reply.get("content"))
         messages.append({"role": "assistant", "content": reply.get("content") or ""})
         res = _run_part(job, part, code, out_dir, attempt)
@@ -108,18 +190,22 @@ def build_code_part(job, spec, part, plan):
         messages.append({"role": "user", "content": "That failed: %s\nAnswer with the corrected complete function." % res.get("error")})
     if best is None:
         return None
-    renders = [os.path.join(out_dir, best["renders"][v]) for v in ("side", "front")]
-    text = job.llm.vision(REFINE_PROMPT.format(name=name, what=part["what"], code=best["code"]),
-                          [side_crop, front_crop] + renders, model=config.BUILDER_MODEL, max_tokens=6000, effort="medium",
-                          json_only=False)
-    if text.strip().upper().startswith("OK") or "```" not in text:
-        job.log("  part %s: built and accepted by its own check (%d tris)" % (name, best.get("triangles", 0)))
-        return best
-    res = _run_part(job, part, _code_from(text), out_dir, "refined")
-    if res.get("ok"):
-        job.log("  part %s: corrected after its check (%d tris)" % (name, res.get("triangles", 0)))
-        return {**res, "code": _code_from(text), "refined": True}
-    job.log("  part %s: the correction failed (%s); keeping the first build" % (name, str(res.get("error"))[:120]))
+    for round_no in range(2):                    # up to two corrections, each checked against the reference
+        cmp = _compare([(side_sq, os.path.join(out_dir, best["box_renders"]["left"])),
+                        (front_sq, os.path.join(out_dir, best["box_renders"]["front"]))],
+                       os.path.join(out_dir, "compare_%d.png" % round_no))
+        text = job.llm.vision(REFINE_PROMPT.format(name=name, what=part["what"], code=best["code"]), [cmp],
+                              model=config.BUILDER_MODEL, max_tokens=12000 if big else 8000, effort=effort, json_only=False)
+        if text.strip().upper().startswith("OK") or "```" not in text:
+            job.log("  part %s: accepted by its own check after %d correction(s) (%d tris)" % (name, round_no, best.get("triangles", 0)))
+            return best
+        why = text.split("```")[0].strip().replace("\n", " ")[:160]
+        res = _run_part(job, part, _code_from(text), out_dir, "refined%d" % round_no)
+        if not res.get("ok"):
+            job.log("  part %s: correction %d failed (%s); keeping the previous build" % (name, round_no + 1, str(res.get("error"))[:120]))
+            return best
+        best = {**res, "code": _code_from(text), "refined": round_no + 1}
+        job.log("  part %s: corrected (%s)" % (name, why))
     return best
 
 
@@ -149,6 +235,7 @@ def _run_part(job, part, code, out_dir, tag):
     res = json.load(open(path))
     if res.get("ok"):
         res["renders"] = {k: os.path.join("run_%s" % tag, v) for k, v in res["renders"].items()}
+        res["box_renders"] = {k: os.path.join("run_%s" % tag, v) for k, v in (res.get("box_renders") or {}).items()}
     return res
 
 
