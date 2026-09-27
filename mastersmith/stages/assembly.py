@@ -226,7 +226,8 @@ def _run_part(job, part, code, out_dir, tag):
     run_dir = os.path.join(out_dir, "run_%s" % tag)
     try:
         _blender(job, "build_part.py", {"name": part["name"], "code": code, "size": _size(part), "material": part["material"],
-                                        "out_dir": run_dir, "render_size": 448}, "part_%s_%s" % (part["name"], tag))
+                                        "out_dir": run_dir, "render_size": 448}, "part_%s_%s" % (part["name"], tag),
+                timeout=300)                 # a part is seconds of work; a runaway loop must not stall the job
     except RuntimeError as exc:
         return {"ok": False, "error": str(exc)[:600]}
     path = os.path.join(run_dir, part["name"] + ".json")

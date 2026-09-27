@@ -197,6 +197,19 @@ def pick_views(ref, category):
     return None
 
 
+FACING_PROMPT = """This picture shows an object from the side. Which end is its FRONT - the muzzle of a gun, the nose of a
+vehicle or aircraft, the end that leads when it moves? Answer JSON only: {"front": "left" | "right", "confidence": 0-1}"""
+
+
+def front_is_left(job, path):
+    """True when the side picture has the object's front on the LEFT. The weapon skill once asked for a 'left-side
+    profile, muzzle pointing right' - a contradiction - and the compact pistol came back muzzle-left (2026-09-27);
+    planned as drawn, the assembly would have been built back to front."""
+    from ..llm import extract_json
+    j = extract_json(job.llm.vision(FACING_PROMPT, [path], max_tokens=300)) or {}
+    return str(j.get("front", "right")).strip().lower() == "left"
+
+
 def make_plan(job, spec, side_src, front_src, mirror_side=False):
     """-> plan dict (see validate_plan) with the gridded pictures it was made from."""
     work = os.path.join(job.work_dir, "plan")
@@ -205,6 +218,9 @@ def make_plan(job, spec, side_src, front_src, mirror_side=False):
     side_px = crop_to_object(side_src, side)
     if mirror_side:
         Image.open(side).transpose(Image.FLIP_LEFT_RIGHT).save(side)
+    if front_is_left(job, side):
+        Image.open(side).transpose(Image.FLIP_LEFT_RIGHT).save(side)
+        job.log("  the side picture has the front on the left; mirrored so the front is on the right")
     front_px = crop_to_object(front_src, front)
     dims = object_dims(spec.size_m, side_px, front_px)
     side_g, front_g = draw_grid(side, os.path.join(work, "side_grid.png")), draw_grid(front, os.path.join(work, "front_grid.png"))

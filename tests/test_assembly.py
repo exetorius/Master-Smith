@@ -47,7 +47,6 @@ HELPERS = '''def build(kit, L, W, H):
     ("def build(kit, L, W, H):\n    return open('x')", "unknown name open"),
     ("def build(kit, L, W, H):\n    return kit.box().__class__", "private attribute"),
     ("def build(kit, L, W, H):\n    return kit._link(None, 'x')", "private attribute"),
-    ("def build(kit, L, W, H):\n    while True:\n        pass", "While is not allowed"),
     ("def build(kit, L, W, H):\n    import bpy\n    return kit.box()", "Import is not allowed"),
     ("def build(kit, L, W, H):\n    x = kit.box()\n    return x.data", "only kit.* and math.*"),
     ("def build(kit, L, W, H):\n    return eval('1')", "unknown name eval"),

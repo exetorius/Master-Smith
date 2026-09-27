@@ -15,7 +15,7 @@ ALLOWED_NODES = (
     ast.Call, ast.keyword, ast.Name, ast.Load, ast.Store, ast.Attribute, ast.Constant, ast.Tuple, ast.List, ast.Dict,
     ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare, ast.If, ast.IfExp, ast.For, ast.Subscript, ast.Slice,
     ast.ListComp, ast.GeneratorExp, ast.comprehension, ast.Starred, ast.Pass, ast.Break, ast.Continue,
-    ast.Lambda, ast.Is, ast.IsNot, ast.DictComp, ast.SetComp, ast.JoinedStr, ast.FormattedValue, ast.Set,
+    ast.Lambda, ast.Is, ast.IsNot, ast.While, ast.Nonlocal, ast.DictComp, ast.SetComp, ast.JoinedStr, ast.FormattedValue, ast.Set,
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow, ast.USub, ast.UAdd, ast.Not, ast.And, ast.Or,
     ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
 )
