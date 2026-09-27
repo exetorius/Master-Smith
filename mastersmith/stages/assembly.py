@@ -69,8 +69,12 @@ Coordinates in percent of the REFERENCE pictures, like the plan. Empty lists whe
 
 
 def _code_from(text):
-    m = re.search(r"```(?:python)?\s*(.*?)```", text or "", re.S)
-    return (m.group(1) if m else (text or "")).strip()
+    """The fenced block that holds def build (a reply can quote other snippets first), else the last block."""
+    blocks = re.findall(r"```(?:python|py)?[ \t]*\n?(.*?)```", text or "", re.S)
+    for b in blocks:
+        if "def build(" in b:
+            return b.strip()
+    return (blocks[-1] if blocks else (text or "")).strip()
 
 
 def _crop_part(src, box_pct, dst, margin=0.18):
