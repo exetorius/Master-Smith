@@ -61,6 +61,15 @@ The header's three selectors choose, per session, the mesh vendor, the picture m
 default; fal's other picture models and OpenRouter's are listed too) and the director model; every label carries
 the price.
 
+### Free builds on this PC
+
+Pick **TRELLIS.2 (this PC, free)** as the mesh vendor and **FLUX.2 klein 4B (free)** as the picture model, or run
+`python -m mastersmith run --name ... --description ... --free`. The pictures (FLUX.2 klein 4B through ComfyUI, ~11 s)
+and the mesh (TRELLIS.2 through trellis.cpp, 1.5-6.5 min) then run on your GPU for $0; only the vision checks still
+go to OpenRouter. The models live outside the repository (`MASTERSMITH_LOCAL_MODELS_DIR`, default `E:\local-models`,
+set up with its own README); ComfyUI starts on first use. Expect a softer mesh than Tripo and looser prompt
+following than Nano Banana: it is for drafts and for working on the pipeline without spending.
+
 Aircraft and helicopters get a glass canopy slot by default; the seed's own interior shows through it.
 
 ### Changing a build

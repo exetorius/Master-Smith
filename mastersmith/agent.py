@@ -93,12 +93,14 @@ TOOLS = [
                            "description": "Leave unset for one vendor mesh (the default). 'assembly' builds a hard surface as parts: "
                                           "the vendor models the sculpted main body, the builder models the mechanical parts in code with crisp "
                                           "edges, and they are assembled and checked against the pictures (experimental, dearer)."},
-            "seed_vendor": {"type": "string", "enum": ["tripo", "hitem3d3mv", "hitem3d3", "meshy7mv", "meshy7", "hitem3d"],
+            "seed_vendor": {"type": "string", "enum": ["tripo", "hitem3d3mv", "hitem3d3", "meshy7mv", "meshy7", "hitem3d", "local"],
                             "description": "The mesh vendor. Leave unset for the default (Tripo). hitem3d3 = Hitem3D v3 at 2048 voxels, the "
                                            "crispest hard-surface geometry (about $2.10 a seed): the answer to melted rails, fused trigger "
                                            "guards and blobby detail; hitem3d3mv = the same model fed every approved angle (front, side, mirrored "
                                            "side, back when drawn) for the same price, the better pick whenever more than one view was "
-                                           "approved. A change of vendor seeds again from the approved pictures."},
+                                           "approved. local = TRELLIS.2 on this PC: free, one picture, 1.5-6.5 min, softer surfaces than "
+                                           "Tripo; pick it when the customer asks for a free or local build or chose it in the selector. "
+                                           "A change of vendor seeds again from the approved pictures."},
             "glass": {"type": "boolean", "description": "Give windows/lenses a glass material slot (default for vehicles and buildings; a weapon gets one only when its caption describes a scope, optic, lens or light)"},
             "rig": {"type": "boolean", "description": "Rig it: characters get a UE5-named humanoid skeleton with walk/run clips; vehicles get wheel bones; weapons get Muzzle/Grip/Sight socket bones"},
             "notes": {"type": "string"},

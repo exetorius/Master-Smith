@@ -425,6 +425,8 @@ def build_vendor_part(job, spec, part, plan):
         model, payload = "hitem3d/hi3d/v3.0/image-to-3d", {"image_url": url, "model": "hi3dv3.0", "resolution": "2048quality",
                                                           "face_count": 200000, "enable_texture": True, "enable_pbr": True,
                                                           "export_format": "glb", "enable_safety_checker": False}
+    elif vendor == "local":
+        model, payload = config.LOCAL_SEED_MODEL, {"image_url": url}      # TRELLIS.2 on this PC, free
     else:
         model, payload = config.SEED_MODEL, {"image_url": url, "geometry_quality": "detailed", "texture_quality": "detailed",
                                              "pbr": True, "face_limit": 150000}

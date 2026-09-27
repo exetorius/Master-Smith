@@ -38,6 +38,8 @@ def hi3d_views(spec, urls):
 def seed_payload(spec, urls):
     face_limit = max(SEED_FACE_MIN, min(SEED_FACE_MAX, spec.tri_budget * SEED_FACE_MULTIPLIER))
     alt = (getattr(spec, "seed_vendor", None) or os.environ.get("MASTERSMITH_SEED_MODEL", "")).strip().lower()
+    if alt == "local":
+        return config.LOCAL_SEED_MODEL, {"image_url": urls[0]}      # TRELLIS.2 on this PC: one picture, the primary view
     if alt == "hitem3d3mv":
         if len(urls) >= 2:
             return config.SEED_HI3D_MULTIVIEW, {**hi3d_views(spec, urls), "model": "hi3dv3.0", "resolution": "2048quality",

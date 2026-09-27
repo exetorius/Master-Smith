@@ -97,6 +97,16 @@ SEED_MODEL = "tripo3d/h3.1/image-to-3d"         # full PBR, thin parts survive
 SEED_MULTIVIEW_MODEL = "tripo3d/h3.1/multiview-to-3d"
 SEED_ALT_MODEL = "fal-ai/hyper3d/rodin/v2"      # several references at once; refuses military subjects
 
+# --- the free tier: models on this PC (mastersmith/local.py). Pick picture_model "local/flux2-klein-4b" and seed_vendor
+# "local" for a build; the ids below route there and cost $0. The folder holds ComfyUI (FLUX.2 klein 4B) and trellis.cpp
+# (TRELLIS.2 GGUF): see its README. ComfyUI is started on first use when it is not already running.
+LOCAL_MODELS_DIR = Path(os.environ.get("MASTERSMITH_LOCAL_MODELS_DIR", r"E:\local-models"))
+LOCAL_COMFY_URL = os.environ.get("MASTERSMITH_LOCAL_COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
+LOCAL_PICTURE_MODEL = "local/flux2-klein-4b"
+LOCAL_SEED_MODEL = "local/trellis2"
+LOCAL_TRELLIS_RES = int(os.environ.get("MASTERSMITH_LOCAL_TRELLIS_RES", "1024"))       # 512 is ~2x faster and softer
+LOCAL_TRELLIS_QUANT = os.environ.get("MASTERSMITH_LOCAL_TRELLIS_QUANT", "q8")           # q8 fits 12 GB; "" = f16, "q4"
+
 # --- spend. You run this against your own fal and OpenRouter keys; the ledger only keeps score of what they spent,
 # in cents. Nothing is charged, held or refused here.
 CREDIT_USD = 0.01                                # one credit is one cent

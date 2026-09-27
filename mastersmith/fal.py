@@ -2,6 +2,8 @@
 Every successful call is appended to `calls` with its table price so the pipeline can settle the bill."""
 import json
 import os
+import shutil
+import tempfile
 import time
 
 import requests
@@ -27,6 +29,7 @@ class Fal:
         self.http = requests.Session()
         self.calls = []
         self.stage = ""
+        self.uploads = {}                    # CDN url -> the local file it came from (the local models read files)
 
     def _retry(self, fn, attempts=4):
         """A dropped connection mid-poll is not a vendor failure: try again a few times before giving up."""
@@ -43,6 +46,8 @@ class Fal:
 
     def run(self, model, payload, timeout=1500, poll=3.0):
         usd = price(model, payload)          # refuses unpriced endpoints before any money moves
+        if model.startswith("local/"):
+            return self._run_local(model, payload, usd)
         t0 = time.time()
         r = self._retry(lambda: self.http.post("%s/%s" % (QUEUE, model), headers=self._h(),
                                                data=json.dumps(payload), timeout=60))
@@ -75,6 +80,25 @@ class Fal:
         self.log("  fal %s: %.0fs, $%.3f" % (model, secs, usd))
         return out
 
+    def _run_local(self, model, payload, usd):
+        """The free tier (mastersmith/local.py): the same call shape, run on this PC, answered like fal answers."""
+        from . import local
+        if model != "local/trellis2":
+            raise FalError("no local runner for %s" % model)
+        url = payload.get("image_url") or (payload.get("image_urls") or [None])[0]
+        image = self.uploads.get(url) or local.file_path(url)
+        work = tempfile.mkdtemp(prefix="ms_local_")
+        if not image:
+            image = self.download(url, os.path.join(work, "input.png"))
+        glb = os.path.join(work, "seed.glb")
+        try:
+            secs = local.trellis(image, glb, log=self.log)
+        except local.LocalError as exc:
+            raise FalError("local %s: %s" % (model, exc))
+        self.calls.append({"model": model, "seconds": secs, "usd": usd, "stage": self.stage})
+        self.log("  local %s: %.0fs, $0" % (model, secs))
+        return local.seed_output(glb)
+
     def upload(self, path, mime=None):
         low = str(path).lower()
         mime = mime or ("image/png" if low.endswith(".png") else "image/jpeg" if low.endswith((".jpg", ".jpeg"))
@@ -90,10 +114,21 @@ class Fal:
         put = self._retry(lambda: self.http.put(body["upload_url"], data=data, headers={"Content-Type": mime}, timeout=300))
         if put.status_code not in (200, 201, 204):
             raise FalError("fal upload PUT: HTTP %d" % put.status_code)
+        self.uploads[body["file_url"]] = os.path.abspath(path)
         return body["file_url"]
 
     def download(self, url, path, timeout=600):
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        if url.startswith("file://"):                  # a local model's result: moved out of its scratch folder
+            from .local import file_path
+            src = file_path(url)
+            scratch = os.path.dirname(src)
+            if os.path.basename(scratch).startswith("ms_local_"):
+                shutil.move(src, path)
+                shutil.rmtree(scratch, ignore_errors=True)
+            else:
+                shutil.copyfile(src, path)
+            return path
         def go():
             with self.http.get(url, stream=True, timeout=timeout) as r:
                 r.raise_for_status()

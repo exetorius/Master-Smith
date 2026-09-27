@@ -31,6 +31,7 @@ FAL_PRICES = {
     "fal-ai/meshy/rigging": 0.20,                # humanoid auto-rig from a GLB; +0.12 with enable_animation
     "fal-ai/meshy/rigging/multi-animation": 0.56,
     "tripo3d/tripo/segment": 0.20,               # semantic part split of a GLB (CALIBRATE against the fal dashboard)
+    "local/trellis2": 0.0,                       # TRELLIS.2 on this PC (mastersmith/local.py): free, 1.5-6.5 min a seed
 }
 
 
@@ -51,6 +52,7 @@ IMAGE_PRICES = {
     "openai/gpt-5.4-image-2": 0.10,
     "openai/gpt-5-image": 0.12,
     "openai/gpt-5-image-mini": 0.03,
+    "local/flux2-klein-4b": 0.0,                 # FLUX.2 klein 4B on this PC (mastersmith/local.py): free, ~11 s a picture
 }
 
 
@@ -71,6 +73,7 @@ PICTURE_NAMES = {           # what the providers call them; the ids are what the
     "google/gemini-3.1-flash-lite-image": "Nano Banana 2 Lite", "google/gemini-2.5-flash-image": "Nano Banana",
     "google/gemini-3-pro-image": "Nano Banana Pro", "google/gemini-3-pro-image-preview": "Nano Banana Pro (preview)",
     "openai/gpt-5.4-image-2": "GPT-5.4 Image 2", "openai/gpt-5-image": "GPT-5 Image", "openai/gpt-5-image-mini": "GPT-5 Image Mini",
+    "local/flux2-klein-4b": "FLUX.2 klein 4B (free)",
 }
 
 
@@ -80,7 +83,7 @@ def picture_catalogue():
     for mid, usd in IMAGE_PRICES.items():
         if mid.endswith("-preview") or mid.endswith("/edit"):
             continue                                   # preview ids alias the released ones; /edit is derived from the base id
-        provider = "fal.ai" if mid.startswith("fal-ai/") else "OpenRouter"
+        provider = "fal.ai" if mid.startswith("fal-ai/") else "this PC" if mid.startswith("local/") else "OpenRouter"
         out.append({"id": mid, "label": "%s · %s (%s) · $%.2f a picture" % (PICTURE_NAMES.get(mid, mid), provider, mid, usd),
                     "name": PICTURE_NAMES.get(mid, mid), "provider": provider, "usd": usd, "default": mid == config.CONCEPT_MODEL})
     return sorted(out, key=lambda r: (not r["default"], r["provider"] != "fal.ai", r["usd"]))
@@ -135,6 +138,8 @@ SEED_VENDORS = [
      "note": "crispest geometry, the best high-poly source for baking, one picture, dear"},
     {"key": "hitem3d3mv", "label": "Hitem3D v3 multi-view (2048)", "model": config.SEED_HI3D_MULTIVIEW, "multiview": True,
      "note": "the same crisp geometry seeded from every approved angle (front, sides, back), same price"},
+    {"key": "local", "label": "TRELLIS.2 (this PC, free)", "model": config.LOCAL_SEED_MODEL, "multiview": False,
+     "note": "free: runs on this PC's GPU from one picture, 1.5-6.5 min; faithful silhouette, softer surfaces than Tripo"},
 ]
 
 
@@ -167,13 +172,14 @@ def estimate_assembly(spec):
     """Worst case of the parts path after the pictures: plan, code parts, vendor parts, assembly and its checks."""
     vendor = seed_vendor(spec)
     part_seed = FAL_PRICES["hitem3d/hi3d/v3.0/image-to-3d"] if vendor["key"].startswith("hitem3d3") else \
+        price(config.LOCAL_SEED_MODEL) if vendor["key"] == "local" else \
         price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"})
     return [
         ("parts plan from the approved pictures (builder)", 2 * BUILDER_CALL_USD),
         ("plan pictures sharpened 4x for the part builder (ESRGAN)", 2 * FAL_PRICES.get(config.UPSCALE_MODEL, 0.02)),
         ("code parts: modelled, built and self-checked (builder, up to %d parts)" % ASSEMBLY_CODE_PARTS,
          2.5 * (ASSEMBLY_BIG_PARTS * BUILDER_CALL_USD + (ASSEMBLY_CODE_PARTS - ASSEMBLY_BIG_PARTS) * BUILDER_SMALL_CALL_USD)),
-        ("vendor parts: drawn alone and seeded (up to %d, %s)" % (ASSEMBLY_VENDOR_PARTS, vendor["label"] if vendor["key"].startswith("hitem3d3") else "Tripo H3.1"),
+        ("vendor parts: drawn alone and seeded (up to %d, %s)" % (ASSEMBLY_VENDOR_PARTS, vendor["label"] if vendor["key"].startswith("hitem3d3") or vendor["key"] == "local" else "Tripo H3.1"),
          ASSEMBLY_VENDOR_PARTS * (image_price(edit_model(spec)) + 2 * LLM_CALL_ALLOWANCE_USD + part_seed)),
         ("assembly checks against the pictures (builder)", config.ASSEMBLY_CHECK_ROUNDS * BUILDER_CALL_USD),
         ("Blender assembly: place, bake one atlas, LODs, collision, FBX/GLB", 0.0),
