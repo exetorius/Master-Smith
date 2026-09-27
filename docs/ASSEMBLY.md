@@ -64,3 +64,31 @@ and a few builtins; the code is checked by an allowlist before Blender runs it.
 assembly when the approved pictures include a side and a front view, and everything else as one seed. `"assembly"`
 or `"single"` forces a path. The builder LLM is `MASTERSMITH_BUILDER_MODEL` (default Claude Opus 5.5 on
 OpenRouter). The vendor for parts follows the brief's `seed_vendor`: Hi3D v3 when it names Hi3D, else Tripo.
+
+## What makes it hold together (learnt on the first test objects, 2026-09-27)
+
+Each of these came from a live build that went wrong; the first shippable assembly (a military utility truck, 5/10
+"ship with notes") came after them.
+
+- **Which end is the front is asked, not assumed.** A vision call says whether the side picture has the front on the
+  left; the picture is mirrored when it does (a pistol came back muzzle-left).
+- **The side picture alone is enough.** When the front view is refused (long guns often fail it), the builder plans
+  from the side and estimates the widths.
+- **One moulding stays one part.** A pistol frame keeps its grip and guard, a stock keeps its pistol grip: a cut
+  through one moulding becomes a gap.
+- **Every part knows its joints.** The service works out from the boxes which neighbour meets which face of a part,
+  the builder is told that face must reach the box edge, and touching boxes overlap by 1-2%.
+- **The builder checks itself against the same framing.** Each code part is rendered orthographically in clay,
+  framed on its own box, beside the reference cropped to that box with a millimetre scale; up to two corrections.
+- **Vendor parts are registered, not guessed.** The part is drawn alone in the reference's side view, seeded, and
+  turned (four upright turns, all 24 as a fallback) until its side silhouette best matches the picture; it then
+  fills its box on every side.
+- **Code parts are handed over as .blend** (glTF drops the procedural material) and a cut that erases most of a part
+  is refused (exact booleans with self-intersection on).
+- **The bake is exact on any material.** Base colour and metalness are baked through an emission (the diffuse pass
+  is zero on metal); every part keeps its own unwrap in an atlas tile sized by its surface area.
+- **The triangle budget holds.** Code parts over their allowance are dissolved on flat areas, then collapsed to their
+  share by surface area.
+
+Test changes to the assembler for free: run `mastersmith/blender/assemble.py` on a finished job's
+`work/assemble_final_args.json` with another `out_dir`; it rebuilds the delivery from the saved parts.
