@@ -26,8 +26,31 @@ class CodeRejected(ValueError):
     pass
 
 
+def strip_math_imports(source):
+    """`import math` and `from math import pi, sin` are harmless (math is provided) and the builder writes them out of
+    habit: the first is dropped, the second becomes `pi = math.pi; sin = math.sin`, both kept at their indentation."""
+    import re
+    out = []
+    for line in source.splitlines():
+        m = re.match(r"^(\s*)import\s+math\s*$", line)
+        if m:
+            if m.group(1):
+                out.append(m.group(1) + "pass")       # inside a block: keep the block non-empty
+            continue                                  # at the top: drop it, build() stays the only statement
+        m = re.match(r"^(\s*)from\s+math\s+import\s+([A-Za-z_][\w, ]*)$", line.rstrip())
+        if m:
+            names = [n.strip() for n in m.group(2).split(",") if n.strip()]
+            if m.group(1):
+                out.append(m.group(1) + "; ".join("%s = math.%s" % (n, n) for n in names))
+            continue
+        out.append(line)
+    return "\n".join(out) + "\n"
+
+
 def check_code(source):
     """Raises CodeRejected with the reason; returns the parsed module when the code may run."""
+    if isinstance(source, str):
+        source = strip_math_imports(source)
     if not isinstance(source, str) or not source.strip():
         raise CodeRejected("no code")
     if len(source) > MAX_SOURCE:
