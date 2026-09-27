@@ -394,6 +394,48 @@ def _run_part(job, part, code, out_dir, tag):
     return res
 
 
+def is_body(part, plan):
+    """The vendor body: a vendor part spanning at least half the object's length."""
+    return part.get("method") == "vendor" and (part["side_box"][1] - part["side_box"][0]) >= 50
+
+
+def erased_body_picture(plan, part, dst, pad=0.08, tiny=5.0, grow=0.4):
+    """The body's picture made from the APPROVED side picture itself: every code part's box is erased to the backdrop
+    (they are modelled in code), then the picture is cropped to the body's box and padded. No picture model redraws
+    the design: FLUX.2 klein, asked to leave out the barrel, drew a different gun (an AK magazine, no sights,
+    2026-09-27), and any redraw can drift. Tiny code parts (pins, screws: under `tiny` percent both ways) stay: erasing
+    them would punch holes in the body. -> (path, [erased part names])"""
+    import numpy as np
+    im = Image.open(plan["side"]).convert("RGB")
+    w, h = im.size
+    bk = _backdrop(plan["side"])
+    back = tuple(int(round(c * 255)) for c in bk)
+    a = np.array(im)
+    # one flat backdrop: the photo's own is a soft gradient, and an erased box in a slightly different white reads as
+    # an edge to the mesher
+    a[np.abs(a.astype(np.float32) / 255.0 - bk).max(axis=2) <= 0.08] = back
+    erased = []
+    for q in plan["parts"]:
+        if q.get("method") != "code":
+            continue
+        x0, x1, zt, zb = q["side_box"]
+        if (x1 - x0) < tiny and (zb - zt) < tiny:
+            continue
+        g = grow
+        c0, c1 = max(0, int((x0 - g) / 100 * w)), min(w, int(np.ceil((x1 + g) / 100 * w)))
+        r0, r1 = max(0, int((zt - g) / 100 * h)), min(h, int(np.ceil((zb + g) / 100 * h)))
+        a[r0:r1, c0:c1] = back
+        erased.append(q["name"])
+    x0, x1, zt, zb = part["side_box"]
+    crop = Image.fromarray(a).crop((int(x0 / 100 * w), int(zt / 100 * h), int(np.ceil(x1 / 100 * w)), int(np.ceil(zb / 100 * h))))
+    m = int(max(crop.size) * pad)
+    side = max(crop.size) + 2 * m
+    sq = Image.new("RGB", (side, side), back)
+    sq.paste(crop, ((side - crop.width) // 2, (side - crop.height) // 2))
+    sq.save(dst)
+    return dst, erased
+
+
 def build_vendor_part(job, spec, part, plan):
     """The part drawn alone from the side reference, checked, seeded on its own and oriented. -> {"blend", "yaw"} or None."""
     name = part["name"]
@@ -406,7 +448,10 @@ def build_vendor_part(job, spec, part, plan):
     others = [q["name"] for q in plan["parts"] if q["name"] != name and q.get("method") == "code"
               and all(min(q["box_max"][i], part["box_max"][i]) - max(q["box_min"][i], part["box_min"][i]) > 0 for i in range(3))]
     leave_out = (" Leave out, they are modelled separately: %s." % ", ".join(others)) if others else ""
-    for attempt in range(2):
+    if is_body(part, plan):
+        picture, erased = erased_body_picture(plan, part, os.path.join(out_dir, "picture_erased.png"))
+        job.log("  part %s: the approved side picture with the code parts erased (%s)" % (name, ", ".join(erased) or "none"))
+    for attempt in range(0 if picture else 2):
         path = os.path.join(out_dir, "picture_%d.png" % attempt)
         # the SAME side view as the reference (forward to the right): its silhouette is what the seed is registered to
         job.images.generate("Show ONLY %s from this exact object, whole and complete, exactly as it looks here (same shape, "
