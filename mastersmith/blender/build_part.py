@@ -175,6 +175,14 @@ try:
     glb = os.path.join(OUT, NAME + ".glb")
     bpy.ops.export_scene.gltf(filepath=glb, use_selection=True, export_format="GLB", export_yup=True)
     result["glb"] = glb
+    # the assembler reads the .blend: glTF cannot carry the procedural material (noise, worn edges), and the parts of
+    # the second bullpup assembly arrived white (2026-09-27)
+    for o in list(bpy.data.objects):
+        if o is not part:
+            bpy.data.objects.remove(o, do_unlink=True)
+    blend = os.path.join(OUT, NAME + ".blend")
+    bpy.ops.wm.save_as_mainfile(filepath=blend, compress=True)
+    result["blend"] = blend
     blib.setup_render(int(args.get("render_size", 512)), 32, look="preview")
     stage = blib.Stage(part)
     result["renders"] = {v: stage.render(v, os.path.join(OUT, "%s_%s.png" % (NAME, name)))["file"]

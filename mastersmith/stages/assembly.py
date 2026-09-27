@@ -297,9 +297,12 @@ def _assemble(job, spec, plan, built, round_no, reference):
         b = built.get(p["name"])
         if not b:
             continue
-        entry = {"name": p["name"], "kind": "code" if b.get("glb") else "vendor", "box_min": p["box_min"],
+        entry = {"name": p["name"], "kind": "code" if b.get("code") else "vendor", "box_min": p["box_min"],
                  "box_max": p["box_max"], "material": p["material"]}
-        entry.update({"glb": b["glb"]} if b.get("glb") else {"blend": b["blend"], "yaw": b.get("yaw", 0)})
+        if b.get("code"):
+            entry.update({"blend": b["blend"]} if b.get("blend") and os.path.exists(b["blend"]) else {"glb": b["glb"]})
+        else:
+            entry.update({"blend": b["blend"], "yaw": b.get("yaw", 0)})
         parts.append(entry)
     out = os.path.join(job.dir, "delivery") if round_no == "final" else os.path.join(job.work_dir, "assembly_%s" % round_no)
     _blender(job, "assemble.py", {"name": spec.name, "out_dir": out, "tri_budget": spec.tri_budget, "engine": spec.engine,
