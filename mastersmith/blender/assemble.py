@@ -61,8 +61,8 @@ def import_part(p):
 
 def fit(o, p):
     """Code parts were built in their box's own frame: moved to the box centre. Vendor parts arrive at their own size,
-    long axis along X and upright: turned by the facing yaw, scaled uniformly until the tightest side fits, then
-    stretched at most 35% on the other sides towards the box, and centred."""
+    long axis along X and upright: turned by the facing yaw, then scaled to fill the box on every side (within 1.8x of
+    the median scale) and centred."""
     bmin, bmax = Vector(p["box_min"]), Vector(p["box_max"])
     centre, size = (bmin + bmax) * 0.5, bmax - bmin
     if p["kind"] == "code":
@@ -73,13 +73,15 @@ def fit(o, p):
     lo, hi = blib.dims(o)
     ext = hi - lo
     ratios = [size[i] / max(ext[i], 1e-9) for i in range(3)]
-    s = min(ratios)
-    stretch = [min(r / s, 1.35) for r in ratios]   # fill the box: a part that stops short leaves a gap at its joint
-                                                    # (the pistol's grip hung free of the frame and base plate, 2026-09-27)
+    # the box was measured from the same picture the part was drawn from: the part FILLS it on every side, so it meets
+    # its neighbours. A uniform fit left the pistol's grip and the shotgun's stock short of the frame and receiver
+    # (2026-09-27). A part more than 1.8x out of proportion with its box is kept in proportion on that axis instead.
+    s = sorted(ratios)[1]
+    scale = [r if r / s <= 1.8 and s / r <= 1.8 else s for r in ratios]
     o.data.transform(Matrix.Translation(-(lo + hi) * 0.5))
-    o.data.transform(Matrix.Diagonal(Vector([s * stretch[i] for i in range(3)]).to_4d()))
+    o.data.transform(Matrix.Diagonal(Vector(scale).to_4d()))
     o.data.transform(Matrix.Translation(centre))
-    return {"scale": round(s, 4), "stretch": [round(v, 3) for v in stretch]}
+    return {"scale": [round(v, 4) for v in scale], "proportion": [round(v / s, 3) for v in scale]}
 
 
 def decimate_to(o, target):
