@@ -471,11 +471,12 @@ class Kit:
         return self._link(bm, name)
 
     # ------------------------------------------------------------------ shaping a piece
-    def fillet(self, obj, radius, segments=4, region=None, angle=35):
+    def fillet(self, obj, radius, segments=4, region=None, angle=35, where=None, box=None):
         """Round the piece's sharp edges with a real radius (several segments), instead of the small default bevel.
         Make the piece with bevel=0 first. region=(x0, y0, z0, x1, y1, z1) limits it to edges inside that box (round the
         top edges of a housing, keep its bottom sharp). Only edges sharper than `angle` degrees are rounded."""
         self._check(obj)
+        region = region if region is not None else (where if where is not None else box)   # the builder's other words
         rad = float(radius)
         if rad <= 0:
             raise KitError("fillet radius must be positive")
