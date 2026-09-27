@@ -33,6 +33,13 @@ recesses and facets is wrong. Large parts carry most of the object's look: build
 then raised panels and bosses, then recesses and cuts, then small features). Crisp hard-surface geometry, nothing
 melted or blobby. A cutter must be one closed solid: for a rounded slot, kit.union a box and two end cylinders into
 one cutter first.
+Pick the kit call by the shape, not boxes for everything: a round part is kit.revolve (one outline gives every step,
+groove and chamfer), a section that changes along the length is kit.loft, a moulded or rounded body is a bevel=0 cage
+with kit.smooth or kit.fillet, a curved part is kit.bend, a rod or loop is kit.sweep.
+
+Before the code, write a numbered list of every feature you can see in pictures 1 and 2: the outline, each opening,
+recess, rib, groove, step, raised panel, screw or pin head, seam and chamfer, each with its position and size in mm
+read off the scale. Then model every item on the list.
 
 The kit:
 {kit}
@@ -47,11 +54,14 @@ REFINE_PROMPT = """The picture compares what your code built for {name} ({what})
 bottom row: the FRONT. In each row the LEFT is the reference cropped to the part's box and the RIGHT is your build
 rendered orthographically in the same box, same scale, same framing - so they should line up. In the FRONT
 reference, parts in front of this one (a barrel, a muzzle device) can hide it; judge what is visible.
-Be critical. Answer OK only if every major shape, opening, recess and step is there and the outline matches the
-reference within a few percent of the box. A missing section, a wrong outline, a part that does not fill its box
-like the reference does, or a plain slab where the reference has recesses and facets is NOT OK.
-If it is not OK, first list in one or two lines what is wrong, then give the corrected complete function in one
-```python block. Your previous code:
+Be critical. First list, numbered, every feature the REFERENCE shows (the outline, each opening, recess, rib,
+groove, step, raised panel, screw or pin head, seam, chamfer, rounded edge) and after each write FOUND or MISSING for
+your build, and whether its position and size match. Then compare the outlines: where does yours stick out or fall
+short, in mm?
+Then the last line: VERDICT: OK only if nothing is MISSING and the outline matches within a few percent of the box.
+A missing feature, a wrong outline, a part that does not fill its box like the reference does, or a plain slab where
+the reference has recesses and facets is VERDICT: FIX - then give the corrected complete function, with every
+MISSING feature added, in one ```python block after the verdict. Your previous code:
 ```python
 {code}
 ```"""
@@ -243,10 +253,12 @@ def build_code_part(job, spec, part, plan):
             refine = "(There is no front picture: the comparison has only the SIDE row.)\n" + refine
         text = job.llm.vision(refine, [cmp],
                               model=model, max_tokens=12000 if big else 8000, effort=effort, json_only=False)
-        if text.strip().upper().startswith("OK") or "```" not in text:
+        verdict = re.findall(r"VERDICT:\W*(OK|FIX)", text.upper())
+        if "```" not in text or (verdict and verdict[-1] == "OK") or text.strip().upper().startswith("OK"):
             job.log("  part %s: accepted by its own check after %d correction(s) (%d tris)" % (name, round_no, best.get("triangles", 0)))
             return best
-        why = text.split("```")[0].strip().replace("\n", " ")[:160]
+        missing = [ln.strip() for ln in text.split("```")[0].splitlines() if "MISSING" in ln.upper()]
+        why = ("; ".join(missing) or text.split("```")[0].strip()).replace("\n", " ")[:200]
         res = _run_part(job, part, _code_from(text), out_dir, "refined%d" % round_no)
         if not res.get("ok"):
             job.log("  part %s: correction %d failed (%s); keeping the previous build" % (name, round_no + 1, str(res.get("error"))[:120]))
