@@ -45,6 +45,49 @@ def test_fixed_key_is_required_and_accepted(client):
     assert h["ok"] and h["local_mode"] is False and h["worker"] is False
 
 
+def test_old_havoc_status_does_not_repeat_false_acceptance(client):
+    from mastersmith import service
+    from mastersmith.spec import Spec
+    spec = Spec(name="Havoc", description="gunship", category="aircraft",
+                add_parts=[{"name": "Cabin", "phrase": "the cockpit interior", "anchor": "glass"}])
+    row = {"id": "old-havoc", "status": "done", "kind": "rework", "spec": spec.to_dict(), "created": 0,
+           "started": 0, "finished": 1, "error": None, "log": "", "result": {
+               "review": {"score": 5, "verdict": "rebuild", "issues": ["bad cabin"]},
+               "gate": {"ok": True, "warnings": []},
+               "diagnosis": [{"finding": "reviewer 5/10: usable with the notes above", "fix": None}],
+               "delivery": {"added_parts": [{"name": "Cabin", "faces_added": 5000}]}}}
+    summary = service.job_view(row, "agent")["summary"]
+    assert not summary["quality"]["accepted"]
+    assert summary["gate"]["ok"] is False and summary["gate"]["technical_ok"] is True
+    assert row["result"]["gate"]["ok"] is True
+    assert "not accepted" in summary["diagnosis"][0]["finding"]
+    assert "usable" not in str(summary["diagnosis"])
+    assert summary["added_parts"][0]["name"] == "Cabin"
+    assert row["result"]["diagnosis"][0]["finding"].startswith("reviewer 5/10: usable")  # history unchanged
+
+
+def test_repair_plan_tool_returns_edits_without_queueing(client, monkeypatch, tmp_path):
+    from mastersmith import service
+    from mastersmith.spec import Spec
+    from mastersmith.store import Store
+    monkeypatch.setenv("OPENROUTER_API_KEY", "not-a-live-key")
+    monkeypatch.setattr(service, "store", Store(tmp_path / "repair-plan.db"))
+    spec = Spec(name="Havoc", description="gunship", category="aircraft")
+    service.store.enqueue("repair-plan-test", "agent", "build", spec.to_dict())
+    service.store.finish("repair-plan-test", "done", result={
+        "delivery": {"bake": {"normal_detail_std": 0.05}},
+        "review": {"score": 4, "verdict": "rebuild", "issues": ["faceted baking artifacts"]}})
+    count = len(service.store.jobs_for("agent"))
+    response = client.post("/v1/sessions/repair-plan-test/tool", headers={"X-API-Key": KEY},
+                           json={"name": "plan_repair", "args": {"job_id": "repair-plan-test"}})
+    assert response.status_code == 200, response.text
+    plan = response.json()
+    assert plan["actions"][0]["changes"]["texture_fixes"] == ["preserve_seed_maps"]
+    assert plan["automatic_build"] is False and plan["requires_confirmation"]
+    assert len(service.store.jobs_for("agent")) == count
+    service.store.db.close()
+
+
 def test_config_hides_secrets(client):
     c = client.get("/v1/config", headers={"Authorization": "Bearer " + KEY}).json()
     assert c["keys_set"]["MASTERSMITH_API_KEY"] is True
@@ -190,3 +233,66 @@ def test_an_outside_model_can_drive_the_director_through_the_session_routes(clie
     assert chat["turns"][0]["turn"]["settings"]["director_model"] == "external"
     assert [x["name"] for x in chat["turns"][0]["turn"]["tools"]] == ["set_brief", "ask_customer"]
     client.delete("/v1/chats/outside", headers=H)
+
+
+def test_briefs_may_only_name_files_the_service_stored(client, tmp_path):
+    from mastersmith import config, service
+    H = {"Authorization": "Bearer " + KEY}
+    outside = tmp_path / "secret.png"
+    outside.write_bytes(b"\x89PNG\r\n\x1a\n")
+    up = client.post("/v1/uploads", headers=H, files={"file": ("ok.png", outside.read_bytes(), "image/png")}).json()["path"]
+    sneaky = os.path.join(config.UPLOADS_DIR, "..", "..", os.path.relpath(str(outside), str(config.DATA_DIR.parent)))
+    for spec in ({"reference_image": str(outside)}, {"reference_images": [up, str(outside)]}, {"reference_image": sneaky},
+                 {"reference_job": str(tmp_path)}, {"add_parts": [{"phrase": "a scope", "picture": str(outside)}]},
+                 {"add_parts": [{"phrase": "a scope", "seed": str(outside)}]}):
+        body = {"spec": {"name": "Crate", "description": "oak crate", **spec}}
+        r = client.post("/v1/jobs", headers=H, json=body)
+        assert r.status_code == 400 and r.json()["detail"]["bad_paths"], spec
+        if "reference_job" not in spec:            # /v1/reference drops reference_job: it draws new pictures
+            assert client.post("/v1/reference", headers=H, json=body).status_code == 400, spec
+    assert service._foreign_paths({"reference_images": [up, "https://example.com/a.png"]}) == []
+    job_dir = config.OUT_DIR / "Crate_x"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    assert service._foreign_paths({"reference_job": str(job_dir)}) == []
+    assert client.post("/v1/jobs", headers=H, json={"spec": {"name": "Crate", "description": "oak crate",
+                                                             "reference_image": up}}).status_code == 200
+
+
+def test_only_the_chat_origin_may_call_from_a_browser(client):
+    H = {"Authorization": "Bearer " + KEY}
+    evil = client.options("/v1/jobs", headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"})
+    assert "access-control-allow-origin" not in evil.headers
+    ok = client.get("/v1/me", headers={**H, "Origin": "http://localhost:3000"})
+    assert ok.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+
+def test_the_example_key_is_refused_at_start_up(client, monkeypatch):
+    from mastersmith import config, service
+    monkeypatch.setattr(config, "API_KEY", config.PLACEHOLDER_API_KEY)
+    with pytest.raises(RuntimeError, match="example value"):
+        service._start()
+
+
+def test_every_blender_run_disables_embedded_scripts():
+    import re
+    from mastersmith import config
+    assert "-Y" in config.BLENDER_FLAGS and "-b" in config.BLENDER_FLAGS
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mastersmith")
+    for folder, _, files in os.walk(root):
+        for f in files:
+            if f.endswith(".py"):
+                text = open(os.path.join(folder, f), encoding="utf-8").read()
+                assert not re.search(r"BLENDER_BIN,\s*\"-b\"", text), f
+
+
+def test_the_chat_says_which_key_is_missing_and_outside_directors_need_none(client, monkeypatch):
+    from mastersmith import config, service
+    H = {"Authorization": "Bearer " + KEY}
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    service.CHATS_DIR = config.DATA_DIR / "chats"
+    r = client.post("/v1/chat", headers=H, json={"message": "a crate", "session_id": "nokey"})
+    assert r.status_code == 503 and "OPENROUTER_API_KEY" in r.json()["detail"]
+    r = client.post("/v1/sessions/nokey-mcp/tool", headers=H, json={"name": "set_brief", "args": {"name": "Crate", "description": "oak crate"}})
+    assert r.status_code == 200 and r.json()["brief"]["name"] == "Crate"
+    for sid in ("nokey", "nokey-mcp"):
+        client.delete("/v1/chats/" + sid, headers=H)

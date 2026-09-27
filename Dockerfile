@@ -1,6 +1,6 @@
 # Master Smith API + worker in one image: Python 3.11, headless Blender 5.2 (Cycles CPU), FastAPI.
 # Build:  docker build -t mastersmith .
-# Run:    docker run -p 8080:8080 --env-file .env -v mastersmith-data:/data mastersmith
+# Run:    docker run -p 127.0.0.1:8080:8080 --env-file .env -v mastersmith-data:/data mastersmith
 # Or, with the chat interface as well: docker compose up --build
 FROM python:3.11-slim
 

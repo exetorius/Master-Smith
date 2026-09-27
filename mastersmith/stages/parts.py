@@ -4,6 +4,7 @@ the vendor gets right. The picture editor cuts the part out of the reference on 
 finish pass fits the seed into the bounding box of the part's faces on the body (the cockpit path), shrinking the
 old faces underneath. Gated to premium / hero builds by the caller."""
 import os
+import re
 
 from .. import config, pricing
 from ..fal import first_url
@@ -12,10 +13,45 @@ from ..llm import extract_json
 CHECK = """Is this a clear picture of ONE {part}, whole, isolated on a plain white background, with no other part of the
 object around it? Answer JSON only: {{"ok": true/false, "score": 1-10, "fixes": "one sentence"}}"""
 
+PRESENT = """Does this picture actually show {part}, as a part that is there on the object (not merely a place where one could
+be mounted)? Answer JSON only: {{"present": true/false, "confidence": 0-1, "what": "few words on what is there"}}"""
+
+_STOP = {"the", "mounted", "attached", "detachable", "gun", "rifle", "top", "front", "rear", "with", "that", "of", "on",
+         "or", "and", "a", "an", "vehicle", "aircraft", "object", "small", "large"}
+
+
+def part_denied_by_brief(spec, phrase):
+    """The word of the brief that rules the part out ('no scope' -> 'scope'), or None. The picture editor draws whatever
+    it is asked for: an EOTech appeared on a bullpup whose brief said 'no scope' (2026-09-25), so a part the brief
+    denies is never drawn or seeded."""
+    text = " ".join([getattr(spec, "description", "") or "", getattr(spec, "notes", "") or ""]).lower()
+    for w in re.findall(r"[a-z]+", (phrase or "").lower()):
+        if len(w) < 4 or w in _STOP:
+            continue
+        for stem in {w, w.rstrip("s")}:
+            if re.search(r"\b(no|without|never)\s+(a\s+|an\s+|any\s+)?%s" % re.escape(stem), text):
+                return w
+    return None
+
+
+def part_present(job, spec, part, reference_path):
+    """False when the brief denies the part or the reference does not show it; one vision call at most."""
+    denied = part_denied_by_brief(spec, part["phrase"])
+    if denied:
+        job.log("  part %s: the brief says no %s; not seeded" % (part.get("name"), denied))
+        return False
+    j = extract_json(job.llm.vision(PRESENT.format(part=part["phrase"]), [reference_path])) or {}
+    if not j.get("present") or float(j.get("confidence") or 0) < 0.5:
+        job.log("  part %s: not seen on the reference (%s); not seeded" % (part.get("name"), j.get("what") or "no answer"))
+        return False
+    return True
+
 
 def make_part_seed(job, spec, part, reference_path):
     """part: {"phrase": "...", "name": "Magazine"} -> {"glb", "picture"} or None."""
     phrase = part["phrase"]
+    if not part_present(job, spec, part, reference_path):
+        return None
     fixes = ""
     picture = None
     for attempt in range(2):
@@ -59,7 +95,11 @@ They were taken from its four horizontal sides. Which picture looks straight at 
 points the same way as the {noun}'s nose or muzzle when the part is fitted ({hint})?
 Answer with JSON only: {{"front": "A" | "B" | "C" | "D", "confidence": 0-1, "reason": "few words"}}"""
 
-FRONT_HINTS = (("cockpit", "the instrument panel the pilot looks at is the front, the seat back is at the rear"),
+FRONT_HINTS = (("bulkhead", "the rear bulkhead wall is at the rear; the open end is the front"),
+               ("shell", "the closed wall is at the rear; the open end is the front"),
+               ("pedal", "the pedals lean toward the pilot: their treads face the rear"),
+               ("stick", "the grip's trigger side faces the pilot at the rear; the stick leans forward"),
+               ("cockpit", "the instrument panel the pilot looks at is the front, the seat back is at the rear"),
                ("seat", "the seat faces forward"), ("interior", "the dashboard is the front, the seat back the rear"),
                ("scope", "the large objective lens is the front, the eyepiece the rear"),
                ("suppressor", "the closed muzzle end is the front"), ("stock", "the butt pad is the rear"),
@@ -78,9 +118,13 @@ def orient_added_part(job, spec, part, glb):
     part_dir = os.path.join(job.work_dir, "part_%s" % name)
     size = float(part.get("size_m") or 0) or -1.0        # -1: keep the seed's own size; the fit scales it later
     _blender(job, "prepare.py", {"name": name, "work_dir": part_dir, "glb": glb, "size_m": size, "forward_axis": "long",
-                                 "origin": "center", "probe_size": 448}, "part_%s_prepare" % name)
+                                 "origin": "center", "probe_size": 448, "keep_upright": True}, "part_%s_prepare" % name)
     if not os.path.exists(os.path.join(part_dir, "work.blend")):
         return None
+    if part.get("yaw_degrees") is not None:
+        yaw = int(part["yaw_degrees"])
+        job.log("  add %s facing: explicit repair -> yaw %d (reusing the part geometry)" % (name, yaw))
+        return {"blend": os.path.join(part_dir, "work.blend"), "yaw": yaw, "facing_source": "explicit"}
     views = ["posx", "negx", "posy", "negy"]
     files = [os.path.join(part_dir, "probe_%s.png" % v) for v in views]
     if not all(os.path.exists(f) for f in files):
@@ -104,20 +148,29 @@ def make_added_part(job, spec, part, reference_path):
     small mesh. -> {"glb", "picture", "name", "phrase"} or None. The body is not touched here; the finish fits it."""
     phrase, name = part["phrase"], part.get("name", "Part")
     picture, fixes = None, ""
+    if part.get("seed") and os.path.exists(part["seed"]):
+        # bought by an earlier job of this chat: the fit, not the mesh, is what a re-finish changes
+        job.log("  add %s: reusing the seed from %s" % (name, os.path.basename(os.path.dirname(part["seed"]))))
+        pic = part.get("picture") if part.get("picture") and os.path.exists(part["picture"]) else None
+        return {"glb": part["seed"], "picture": pic, "name": name, "phrase": phrase, "reused": True}
     if part.get("picture") and os.path.exists(part["picture"]):
         picture = part["picture"]
     else:
-        interior = part.get("place") == "inside" and any(w in phrase.lower() for w in INTERIOR_WORDS)
+        low = phrase.lower()
+        inside = part.get("place") == "inside"
+        whole_interior = inside and any(w in low for w in INTERIOR_WORDS) \
+            and not any(w in low for w in ("wall", "shell", "bulkhead", "stick", "pedal", "lever", "panel only"))
         for attempt in range(2):
             path = os.path.join(job.dir, "part_%s_ref_%d.png" % (name, attempt))
-            if interior or not reference_path or not os.path.exists(reference_path):
-                # the fittings alone: the first Havoc interior came as a whole nose module with engines round it, so the
-                # seat was toy-sized once the module was scaled to the cockpit (2026-09-24)
-                prompt = ("ONLY the loose fittings of %s of a %s: the seat, panel, consoles, controls and floor pan as one "
-                          "open assembly with nothing around it, NO fuselage, NO hull, NO engines, NO canopy, NO exterior "
-                          "bodywork, seen from a three-quarter front angle slightly above, complete, isolated on a plain "
-                          "pure white background, nothing else in frame, photorealistic, sharp. %s"
-                          % (phrase, (spec.search_query or spec.description[:140]), fixes)).strip()
+            if inside or not reference_path or not os.path.exists(reference_path):
+                # a part that lives inside is not on the exterior reference: it is drawn from the words. The first Havoc
+                # interior came as a whole nose module with engines round it, so the seat was toy-sized once the module
+                # was scaled to the cockpit (2026-09-24): no bodywork, ever.
+                what = phrase  # never append a floor/seat/controls that the requested module explicitly excludes
+                prompt = ("ONLY %s, of a %s, as one object with nothing around it, NO fuselage, NO hull, NO engines, "
+                          "NO canopy, NO exterior bodywork, seen from a three-quarter front angle slightly above, whole "
+                          "and complete, isolated on a plain pure white background, nothing else in frame, "
+                          "photorealistic, sharp. %s" % (what, (spec.search_query or spec.description[:140]), fixes)).strip()
                 job.images.generate(prompt, path, model=pricing.concept_model(spec), aspect_ratio="4:3")
             else:
                 prompt = ("Show ONLY %s that belongs on this exact object, whole and complete, matching its colours and "

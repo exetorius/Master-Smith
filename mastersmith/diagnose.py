@@ -5,6 +5,7 @@ angle). Why: on the 2026-09-24 M4A1 the cheap director only saw "muddy textures"
 had swallowed the rifle, the photo's lighting had been projected on, and the seed had one view. Nothing here spends."""
 import os
 import re
+from .quality import assess, assembly_findings, requested_parts
 
 GEOMETRY_WORDS = ("melted", "blobby", "low-poly", "fused", "glitch", "warped", "missing geometry", "deformed", "misshapen", "collapsed")
 SPECULAR_WORDS = ("baked", "painted-on", "painted on", "specular", "reflection", "burnt-in", "highlight")
@@ -57,13 +58,21 @@ def diagnose(result, work_dir, spec, reference_source=None):
                     "fix": {"texture_fixes": ["kill_highlights", "delight"]}})
 
     # --- reviewer sentences -> remedies
-    if any(w in joined for w in SPECULAR_WORDS):
+    bake = delivery.get("bake") or {}
+    finish_regression = review.get("finish_regression") is True or (bool(bake) and bake.get("status") != "skipped" and
+                        any(w in joined for w in ("facet", "baking artifact", "triangular")))
+    if finish_regression:
+        out.append({"finding": "possible finishing regression: source maps were processed by the detail baker",
+                    "remedy": "compare the seed preview with the final render; re-finish the SAME seed with source "
+                              "maps preserved before considering repainting or another vendor",
+                    "fix": {"texture_fixes": list(dict.fromkeys((spec.texture_fixes or []) + ["preserve_seed_maps"]))}})
+    if not finish_regression and any(w in joined for w in SPECULAR_WORDS):
         out.append({"finding": "reviewer: painted lighting / specular in the texture", "remedy": "free re-finish with kill_highlights + delight",
                     "fix": {"texture_fixes": ["kill_highlights", "delight"]}})
-    elif any(w in joined for w in BLUR_WORDS):
+    elif not finish_regression and any(w in joined for w in BLUR_WORDS):
         out.append({"finding": "reviewer: blurry / muddy / flat texture", "remedy": "free re-finish with delight; if still flat, a repaint",
                     "fix": {"texture_fixes": ["delight"]}})
-    if any(w in joined for w in GEOMETRY_WORDS):
+    if not finish_regression and any(w in joined for w in GEOMETRY_WORDS):
         vendor = str(getattr(spec, "seed_vendor", None) or "").lower()
         if vendor.startswith("hitem"):
             # Hitem3D already had its go (the Abrams: Tripo 4/10, Hi3D v3 4/10, 2026-09-24): the crisper seed is not the
@@ -75,7 +84,12 @@ def diagnose(result, work_dir, spec, reference_source=None):
         else:
             out.append({"finding": "reviewer: melted or fused geometry", "remedy": "a crisper seed: Hitem3D v3 (2048) from the same approved "
                                    "pictures, or more angles for Tripo", "fix": {"seed_vendor": "hitem3d3"}})
-    if any(w in joined for w in GLASS_WORDS) and getattr(spec, "glass", False):
+    interior_requested = any(p.get("place") == "inside" for p in requested_parts(spec))
+    if any(w in joined for w in GLASS_WORDS) and getattr(spec, "glass", False) and interior_requested:
+        out.append({"finding": "the requested interior is not readable through the canopy",
+                    "remedy": "inspect assembly close-ups, fit/orientation and glass clarity separately; do not hide the "
+                              "requested cabin behind dark glass or replace geometry fixes with texture fixes", "fix": None})
+    elif any(w in joined for w in GLASS_WORDS) and getattr(spec, "glass", False):
         out.append({"finding": "reviewer: the glass / canopy reads wrong", "remedy": "free re-finish: clear_glass_highlights, or dark_canopy "
                                "when the interior is hollow", "fix": {"texture_fixes": ["clear_glass_highlights", "dark_canopy"]}})
     if any(w in joined for w in EXTRA_WORDS):
@@ -84,7 +98,7 @@ def diagnose(result, work_dir, spec, reference_source=None):
 
     # --- cockpit tub, removed parts, highlight passes: what the finish did, so the director can say so
     m = re.search(r"cockpit fitted under the canopy \((\d+) faces, scale ([\d.]+)\)", log)
-    if m and float(m.group(2)) > 1.6:
+    if m and float(m.group(2)) > 1.6 and not interior_requested:
         out.append({"finding": "the cockpit tub was scaled x%s to fit and part of it may stick out" % m.group(2),
                     "remedy": "build without the tub (cockpit=false) and use dark_canopy", "fix": {"cockpit": False, "texture_fixes": ["dark_canopy"]}})
     for key, label in (("removed_parts", "parts removed"), ("glass_reflections_cleared", "glass highlights cleared")):
@@ -95,8 +109,16 @@ def diagnose(result, work_dir, spec, reference_source=None):
         out.append({"finding": "kill_highlights replaced %s texels (%s%% of the atlas)" % (m.group(1), m.group(2)), "remedy": "done in this job", "fix": None})
 
     # --- the score itself
+    quality = assess(spec, delivery, review)
+    for finding in assembly_findings(spec, delivery, review):
+        out.append({"finding": finding, "remedy": "inspect focused assembly renders and correct this part's fit or "
+                    "geometry; reuse purchased seeds and do not repeat an unchanged re-finish", "fix": None})
     score = review.get("score")
-    if isinstance(score, (int, float)):
+    if not quality["accepted"]:
+        out.insert(0, {"finding": "reviewer %s/10: not accepted (%s)" % (score, quality["issues"][0]),
+                       "remedy": "a completed job or technical gate pass is not visual acceptance; resolve or inspect "
+                                 "the reported defects before claiming the repair worked", "fix": None})
+    elif isinstance(score, (int, float)):
         if score >= 7:
             out.insert(0, {"finding": "reviewer %s/10: ship" % score, "remedy": "nothing needed", "fix": None})
         elif score >= 5:

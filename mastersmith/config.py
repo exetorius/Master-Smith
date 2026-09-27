@@ -30,11 +30,20 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 DB_PATH = DATA_DIR / "mastersmith.db"
 
 BLENDER_BIN = os.environ.get("BLENDER_BIN", r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe")
+# Every Blender run: headless, and never the scripts a .blend carries (-Y), whatever the user's "Auto Run Python
+# Scripts" preference says - customers hand us .blend files.
+BLENDER_FLAGS = ["-b", "-Y"]
 
 # A fixed API key for scripts and agents, straight from .env: any string you make up. Requests then carry it as a
 # bearer token or X-API-Key. With no key configured, every request is the local user: this is one person's tool.
 API_KEY = os.environ.get("MASTERSMITH_API_KEY", "").strip()
 API_USER = os.environ.get("MASTERSMITH_API_USER", "agent").strip() or "agent"
+# The key older copies of .env.example shipped: known to everyone, so the service refuses to start with it.
+PLACEHOLDER_API_KEY = "ms_dev_change_me"
+# Browser origins that may call the API directly. The chat's own requests go through its Next.js server, so this only
+# matters for a page you build yourself; any other website open in your browser is refused.
+CORS_ORIGINS = [o.strip() for o in os.environ.get(
+    "MASTERSMITH_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
 
 # --- LLMs (OpenRouter ids). The director runs the chat and decides; it is cheap on purpose.
 DIRECTOR_MODEL = os.environ.get("MASTERSMITH_DIRECTOR_MODEL", "google/gemini-3.8-flash")
@@ -69,6 +78,9 @@ SEED_MODEL_ALTERNATIVES = {"hitem3d": "fal-ai/hitem3d/image-to-3d", "meshy7": "f
 # Multiview alternatives: these take the SAME checked view set as Tripo multiview. Meshy v7 multi-image asks only for
 # "1 to 4 images of the same object from different angles" - no fixed [front, left, back, right] order (issue #6).
 SEED_MULTIVIEW_ALTERNATIVES = {"meshy7mv": "fal-ai/meshy/v7/multi-image-to-3d"}
+# Hi3D v3 multi-view (2026-09-25): the same 2048-voxel model fed named front / back / left / right pictures instead of one.
+# Same price as its single-image sibling; every slot is optional, so our [primary, second view, mirror] set fits it.
+SEED_HI3D_MULTIVIEW = "hitem3d/hi3d/v3.0/multi-view-to-3d"
 # Hybrid seed (2026-09-18): Meshy v7 geometry (sharper, ~$0.035) then Meshy retexture on the mesh's own UVs (~$0.30) for
 # a clean albedo instead of Meshy's speckled one. Categories listed here default to it; MASTERSMITH_HYBRID=0|1 overrides.
 _hyb_env = os.environ.get("MASTERSMITH_HYBRID", "").strip()

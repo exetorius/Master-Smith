@@ -159,7 +159,7 @@ if args["forward_axis"] == "long" and ext.y > ext.x * 1.15:
     log("rotated: long axis was Y, now X")
 lo, hi = blib.dims(ob)
 ext = hi - lo
-if args["forward_axis"] == "long" and ext.z > max(ext.x, ext.y) * 1.15:
+if args["forward_axis"] == "long" and ext.z > max(ext.x, ext.y) * 1.15 and not args.get("keep_upright"):   # a stick stays a stick
     # a sword or rifle that arrived standing up (hybrid Longsword, 2026-09-18) lies along X like every other weapon
     import math as _math
     ob.rotation_mode = "XYZ"

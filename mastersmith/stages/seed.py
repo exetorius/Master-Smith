@@ -25,11 +25,36 @@ def quad_wanted(spec):
     return config.SEED_QUAD if config.SEED_QUAD is not None else spec.category in config.HARD_SURFACE_CATEGORIES
 
 
+# Which of Hi3D's named slots each of our views fills, by category, for the skill's [primary, second view, mirrored
+# primary] list (an orthographic set is always [front, left, back, right]). None = a three-quarter primary with no
+# slot of its own; it fills the front only when nothing else does.
+HI3D_ROLES = {"weapon": ("left", "front", "right"), "character": ("front", "back"),
+              "prop": (None, "front"), "environment": (None, "front"),
+              "vehicle": (None, "left"), "aircraft": (None, "left"), "helicopter": (None, "left")}
+
+
+def hi3d_views(spec, urls):
+    roles = ("front", "left", "back", "right") if len(urls) >= 4 else HI3D_ROLES.get(spec.category, (None, "front"))
+    slots = {}
+    for url, role in zip(urls, roles):
+        if role and role not in slots:
+            slots[role] = url
+    if "front" not in slots:
+        slots["front"] = urls[0]
+    return {"%s_image_url" % k: v for k, v in slots.items()}
+
+
 def seed_payload(spec, urls):
     face_limit = max(SEED_FACE_MIN, min(SEED_FACE_MAX, spec.tri_budget * SEED_FACE_MULTIPLIER))
     alt = (getattr(spec, "seed_vendor", None) or os.environ.get("MASTERSMITH_SEED_MODEL", "")).strip().lower()
     if not alt and hybrid_wanted(spec) and config.HYBRID_SEED != "tripo":
         alt = config.HYBRID_SEED          # "meshy7mv" as before; "tripo" keeps Tripo's geometry under the repaint
+    if alt == "hitem3d3mv":
+        if len(urls) >= 2:
+            return config.SEED_HI3D_MULTIVIEW, {**hi3d_views(spec, urls), "model": "hi3dv3.0", "resolution": "2048quality",
+                                                "face_count": face_limit, "enable_texture": True, "enable_pbr": True,
+                                                "export_format": "glb", "enable_safety_checker": False}
+        alt = "hitem3d3"                # one picture: its single-image sibling
     if alt in config.SEED_MULTIVIEW_ALTERNATIVES:
         # a multiview alternative takes the whole view set; with one view it would waste the extra angles, so it
         # falls back to its single-image sibling only when the caller has just one picture
@@ -65,7 +90,7 @@ def seed_payload(spec, urls):
 
 def make_seed(job, urls):
     model, payload = seed_payload(job.spec, urls)
-    n_views = len(payload.get("image_urls") or [payload.get("image_url")])
+    n_views = len(payload.get("image_urls") or [k for k in payload if k.endswith("_image_url")] or [payload.get("image_url")])
     job.log("  seeding with %s (%d view%s)" % (model.split("/")[-3] if model.count("/") >= 2 else model.split("/")[0],
                                              n_views, "" if n_views == 1 else "s"))
     out = job.fal.run(model, payload)

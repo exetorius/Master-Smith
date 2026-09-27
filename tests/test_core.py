@@ -69,6 +69,64 @@ def test_seed_payload_switches_to_multiview_with_two_views():
     assert seed_payload(tiny, ["u"])[1]["face_limit"] == 150000
 
 
+def test_weapon_glass_follows_the_caption():
+    assert Spec(name="R", description="a carbine with a 4x ACOG scope on the rail", category="weapon").glass is True
+    assert Spec(name="R", description="a bullpup carbine, no sling, no hands, no scope.", category="weapon").glass is False
+    assert Spec(name="R", description="a plain pump shotgun with a wooden stock", category="weapon").glass is False
+    assert Spec(name="R", description="a pistol with a red-dot sight and a weapon light", category="weapon").glass is True
+    assert Spec(name="R", description="a plain rifle", category="weapon", glass=True).glass is True      # an explicit ask wins
+    assert Spec(name="R", description="a sedan", category="vehicle").glass is True
+
+
+def test_part_seeds_need_a_hero_budget_or_an_ask_not_premium():
+    from mastersmith.stages.parts import part_denied_by_brief, part_present
+    steps = lambda s: [n for n, _ in pricing.estimate(s)["steps"]]              # noqa: E731
+    assert not any("separately seeded" in n for n in steps(Spec(name="R", description="rifle", category="weapon", premium=True)))
+    assert any("separately seeded" in n for n in steps(Spec(name="R", description="rifle", category="weapon", tri_budget=150000)))
+    assert any("separately seeded" in n for n in steps(Spec(name="R", description="rifle", category="weapon", part_seeds=[{"phrase": "x"}])))
+    bull = Spec(name="B", description="a bullpup carbine, no sling, no hands, no scope.", category="weapon")
+    assert part_denied_by_brief(bull, "the optic or scope mounted on top of the gun") == "scope"
+    assert part_denied_by_brief(bull, "the detachable magazine of the gun") is None
+    assert part_denied_by_brief(Spec(name="B", description="a rifle without a magazine", category="weapon"), "the detachable magazine of the gun") == "magazine"
+
+    class Llm:
+        def __init__(self, answer):
+            self.answer, self.asked = answer, 0
+
+        def vision(self, prompt, files):
+            self.asked += 1
+            return self.answer
+
+    class Job:
+        def __init__(self, answer):
+            self.llm, self.lines = Llm(answer), []
+
+        def log(self, m):
+            self.lines.append(m)
+    j = Job('{"present": false, "confidence": 0.9, "what": "a bare rail"}')
+    assert part_present(j, bull, {"name": "Optic", "phrase": "the optic or scope mounted on top of the gun"}, "ref.png") is False
+    assert j.llm.asked == 0 and "the brief says no scope" in j.lines[-1]        # denied by the brief: no vision call
+    assert part_present(j, bull, {"name": "Magazine", "phrase": "the detachable magazine of the gun"}, "ref.png") is False
+    assert j.llm.asked == 1 and "not seen on the reference" in j.lines[-1]
+    assert part_present(Job('{"present": true, "confidence": 0.8}'), bull, {"name": "Magazine", "phrase": "the detachable magazine of the gun"}, "ref.png") is True
+
+
+def test_hi3d_multiview_fills_its_named_slots_from_our_view_list():
+    w = Spec(name="A", description="x", category="weapon", seed_vendor="hitem3d3mv")
+    model, p = seed_payload(w, ["left", "front", "mirror"])          # the weapon skill: profile, muzzle view, mirrored profile
+    assert model == "hitem3d/hi3d/v3.0/multi-view-to-3d"
+    assert (p["front_image_url"], p["left_image_url"], p["right_image_url"]) == ("front", "left", "mirror") and "back_image_url" not in p
+    assert p["resolution"] == "2048quality" and p["enable_pbr"] and p["export_format"] == "glb" and p["face_count"] == 360000
+    v = Spec(name="A", description="x", category="vehicle", seed_vendor="hitem3d3mv")
+    p = seed_payload(v, ["f", "l", "b", "r"])[1]                        # the orthographic set
+    assert (p["front_image_url"], p["left_image_url"], p["back_image_url"], p["right_image_url"]) == ("f", "l", "b", "r")
+    p = seed_payload(v, ["tq", "l"])[1]                                 # no orthographic set: the three-quarter shot stands in for the front
+    assert (p["front_image_url"], p["left_image_url"]) == ("tq", "l")
+    p = seed_payload(Spec(name="A", description="x", category="prop", seed_vendor="hitem3d3mv"), ["tq", "front"])[1]
+    assert p["front_image_url"] == "front" and [k for k in p if k.endswith("_image_url")] == ["front_image_url"]
+    assert seed_payload(w, ["only"])[0] == "hitem3d/hi3d/v3.0/image-to-3d"   # one picture: the single-image sibling
+
+
 def test_wallet_keeps_score_of_spend_and_never_refuses():
     with tempfile.TemporaryDirectory() as d:
         w = Wallet(os.path.join(d, "w.db"))
@@ -146,7 +204,7 @@ def test_gate_and_package_on_a_synthetic_delivery():
         report = {"lods": [{"lod": 0, "triangles": 29990}], "maps": [{"role": "BC"}, {"role": "N"}, {"role": "ORM"}],
                   "dimensions_m": [0.6, 0.4, 0.5], "collision": {"triangles": 72}, "files": ["SM_Crate.fbx", "T_Crate_BC.png"],
                   "roughness_mean": 0.55}
-        g = check(spec, report, {"score": 7, "issues": []}, d)
+        g = check(spec, report, {"score": 7, "verdict": "ship", "issues": []}, d)
         assert g["ok"], g
         bad = check(spec, {**report, "maps": [{"role": "BC"}], "dimensions_m": [1.2, 0.4, 0.5]}, {"score": 3, "issues": ["melted"]}, d)
         assert not bad["ok"] and any("normal map" in w for w in bad["warnings"]) and any("size" in w for w in bad["warnings"])
@@ -354,11 +412,13 @@ def test_remove_parts_are_normalised_phrases():
 
 def test_estimate_prices_the_chosen_mesh_vendor():
     cat = {v["key"]: v for v in pricing.vendor_catalogue()}
-    assert cat["tripo"]["usd"] == 0.6 and cat["hitem3d3"]["usd"] == 2.1
+    assert cat["tripo"]["usd"] == 0.6 and cat["hitem3d3"]["usd"] == 2.1 and cat["hitem3d3mv"]["usd"] == 2.1 and cat["hitem3d3mv"]["multiview"]
     default = pricing.estimate(Spec(name="R", description="rifle", category="weapon"))
     dear = pricing.estimate(Spec(name="R", description="rifle", category="weapon", seed_vendor="hitem3d3"))
     assert any(n.startswith("3D seed (Tripo") for n, _ in default["steps"])
     assert any(n == "3D seed (Hitem3D v3 (2048))" for n, _ in dear["steps"]) and dear["usd"] > default["usd"]
+    mv = pricing.estimate(Spec(name="R", description="rifle", category="weapon", seed_vendor="hitem3d3mv"))
+    assert any(n == "3D seed (Hitem3D v3 multi-view (2048))" for n, _ in mv["steps"]) and mv["usd"] == dear["usd"]
     assert pricing.seed_vendor(Spec(name="R", description="r", seed_vendor="nonsense"))["key"] == "tripo"
 
 
@@ -396,7 +456,7 @@ def test_texture_fixes_are_a_known_catalogue():
     s = Spec(name="Jet", description="grey jet", category="aircraft", texture_fixes=["delight", " Dark_Canopy ", "nonsense", "delight"])
     assert s.texture_fixes == ["delight", "dark_canopy"]
     assert Spec(name="Jet", description="grey jet").texture_fixes == []
-    assert set(TEXTURE_FIXES) == {"delight", "clear_glass_highlights", "dark_canopy", "kill_highlights"}
+    assert set(TEXTURE_FIXES) == {"delight", "clear_glass_highlights", "dark_canopy", "kill_highlights", "preserve_seed_maps", "smooth_organic_normals"}
 
 
 def test_director_ask_records_the_question_and_options():
@@ -510,3 +570,93 @@ def test_add_parts_are_normalised_and_priced():
     assert any(n.startswith("added part Cockpitinterior") for n, _ in with_part["steps"]) and with_part["usd"] > pricing.estimate(plain)["usd"]
     rw = pricing.estimate_rework(s, "refinish")
     assert any(n.startswith("added part") for n, _ in rw["steps"])
+
+
+def test_add_parts_keep_a_bought_seed_and_price_it_as_a_fit():
+    s = Spec(name="Havoc", description="gunship", category="aircraft",
+             add_parts=[{"name": "CockpitInterior", "phrase": "the cockpit interior", "anchor": "glass", "seed": "/x/part_CockpitInterior_seed.fbx"}])
+    assert s.add_parts[0]["seed"] == "/x/part_CockpitInterior_seed.fbx"
+    steps = dict(pricing.estimate(s)["steps"])
+    fit = [k for k in steps if k.startswith("added part CockpitInterior")]
+    assert fit and "already bought" in fit[0] and steps[fit[0]] < 0.05
+
+
+def test_add_parts_offset_is_three_floats():
+    s = Spec(name="H", description="g", category="aircraft",
+             add_parts=[{"name": "Stick", "phrase": "a flight stick", "anchor": "glass", "offset_m": ["0.3", None]},
+                        {"name": "Pedals", "phrase": "rudder pedals", "anchor": "glass"}])
+    assert s.add_parts[0]["offset_m"] == [0.3, 0.0, 0.0] and s.add_parts[1]["offset_m"] == [0.0, 0.0, 0.0]
+
+
+def test_outside_links_must_resolve_to_public_addresses(monkeypatch, tmp_path):
+    import socket
+    from mastersmith import netsafe
+    table = {"good.example": "93.184.216.34", "lan.example": "192.168.1.20", "meta.example": "169.254.169.254",
+             "loop6.example": "::1", "mapped.example": "::ffff:127.0.0.1"}
+
+    def fake_dns(host, port, *a, **k):
+        if host not in table:
+            raise socket.gaierror("unknown")
+        fam = socket.AF_INET6 if ":" in table[host] else socket.AF_INET
+        return [(fam, socket.SOCK_STREAM, 6, "", (table[host], port))]
+    monkeypatch.setattr(netsafe.socket, "getaddrinfo", fake_dns)
+    netsafe.check_public("https://good.example/a.png")
+    for bad in ("http://lan.example/x", "http://meta.example/latest/meta-data", "http://loop6.example/", "http://mapped.example/",
+                "file:///etc/passwd", "ftp://good.example/a.png", "http://nowhere.example/"):
+        with pytest.raises(netsafe.UnsafeURL):
+            netsafe.check_public(bad)
+
+    class Resp:
+        def __init__(self, status, location=None, body=b""):
+            self.status_code, self.headers, self.body = status, {"location": location} if location else {}, body
+            self.is_redirect = location is not None
+        def close(self):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+        def raise_for_status(self):
+            pass
+        def iter_content(self, n):
+            yield self.body
+    hops = {"https://good.example/a.png": Resp(302, "http://lan.example/secret"),
+            "https://good.example/b.png": Resp(200, body=b"x" * 2048)}
+    monkeypatch.setattr(netsafe.requests, "get", lambda url, **k: hops[url])
+    with pytest.raises(netsafe.UnsafeURL):                      # a public link that redirects inward is refused
+        netsafe.download_public("https://good.example/a.png", str(tmp_path / "a.png"))
+    assert os.path.getsize(netsafe.download_public("https://good.example/b.png", str(tmp_path / "b.png"))) == 2048
+    with pytest.raises(netsafe.UnsafeURL):
+        netsafe.download_public("https://good.example/b.png", str(tmp_path / "c.png"), max_bytes=1024)
+    assert not os.path.exists(tmp_path / "c.png")
+    from mastersmith.stages import research
+    assert research.fetch_image("https://good.example/a.png") == (None, None)
+
+
+def test_the_job_store_survives_the_worker_and_requests_at_once(tmp_path):
+    """The service shares one Store between request threads and the worker: a build logs while the chat polls it."""
+    import threading
+    from mastersmith.store import Store
+    st = Store(str(tmp_path / "jobs.db"))
+    st.enqueue("job", "u", "build", {"name": "X"})
+    errors = []
+
+    def run(fn, n=300):
+        try:
+            for i in range(n):
+                fn(i)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(repr(exc))
+    work = [lambda i: st.append_log("job", "line %d" % i),
+            lambda i: st.job("job", "u"),
+            lambda i: st.enqueue("q%d_%d" % (threading.get_ident(), i), "u", "build", {"name": "Y"}),
+            lambda i: st.jobs_for("u"),
+            lambda i: st.claim_next(),
+            lambda i: st.mark_running("job")]
+    threads = [threading.Thread(target=run, args=(w,)) for w in work * 2]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert len(st.job("job")["log"].splitlines()) == 600

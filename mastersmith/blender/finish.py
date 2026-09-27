@@ -17,6 +17,8 @@ from mathutils import Matrix, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blib  # noqa: E402
+from finish_policy import detail_bake_skip_reason  # noqa: E402
+from surface_normals import smooth_organic_normals  # noqa: E402
 
 args = json.load(open(sys.argv[sys.argv.index("--") + 1]))
 # Scripted texture repairs the brief asked for (Spec.texture_fixes): deterministic, free, applied on a re-finish of
@@ -1200,7 +1202,17 @@ def material_pass(found, mat, profile, reference_path):
             matched = np.interp(src_l, s_q, t_q)
             gap = float(np.abs(matched - src_l).mean())
             out["basecolor_tone_gap"] = round(gap, 3)
-            if gap > 0.06:
+            # a quantile match assumes the atlas and the photo show the same mix of tones. An atlas with a far larger
+            # share of black texels (rail, barrel, bore) than the photo's foreground maps its mid-grey body onto the
+            # photo's light tones and LIGHTENS it (the Hi3D bullpup: 30% vs 8% dark, lum 0.27 -> 0.35, 2026-09-25)
+            _used = src_l > 0.03
+            dark_src = float((src_l[_used] < 0.12).mean()) if _used.any() else 0.0
+            dark_ref = float((ref_l[fg] < 0.12).mean())
+            out["basecolor_dark_share"] = [round(dark_src, 3), round(dark_ref, 3)]
+            if gap > 0.06 and profile.get("tone_match", 0.6) is not None and abs(dark_src - dark_ref) > 0.15:
+                log("base colour tone pull skipped: the atlas is %.0f%% dark texels, the photo %.0f%%; a quantile match would "
+                    "lighten the body instead of matching it" % (dark_src * 100, dark_ref * 100))
+            elif gap > 0.06 and profile.get("tone_match", 0.6) is not None:
                 # the further off the atlas is, the harder it is pulled (a 0.5 pull left the Havoc light blue against
                 # a slate-grey reference, 2026-09-18); the profile value is the floor
                 strength = float(min(0.85, profile.get("tone_match", 0.6) + max(0.0, gap - 0.06) * 2.0))
@@ -1623,6 +1635,12 @@ for slot in ob.material_slots:
         # the brief asked for the baked shading to go: full-strength de-light whatever the category profile says
         profile = {**(profile or {}), "delight": True, "delight_strength": 0.95}
         log("texture fix: strong de-light requested")
+    if "preserve_seed_maps" in TEXTURE_FIXES:
+        # the seed's colour IS the asset: no tone pull towards the reference and no de-light. On the Hi3D bullpup
+        # (2026-09-25) the pull lifted the atlas from 0.27 to 0.35 and cut saturation to 0.73, turning the black grip,
+        # magazine and barrel light grey and the olive panels chalky; roughness and metallic are still rebuilt.
+        profile = {**(profile or {}), "delight": False, "tone_match": None}
+        log("texture fix: preserve_seed_maps keeps the seed's base colour (no tone pull, no de-light)")
     # a seed with colour but no roughness / metallic maps (Hi3D v3 ships BC + N only) gets a flat ORM-style map so the
     # material pass, the families and the recolour have something to write into and the delivery has an ORM
     if "BC" in found and ("R" not in found or "M" not in found) and profile:
@@ -2130,6 +2148,18 @@ def fit_part(obj, faces, glb, name):
         if slot.material:
             slot.material.name = "MI_%s_%s" % (NAME, name)
     p.name = name
+    # the part's slice of the budget, as for an added part: an optic seed joined to the 355k-face bullpup took the
+    # whole 60k collapse and the body shredded (2026-09-25). Reduced on its own and marked so the LODs spare it.
+    part_budget = max(int(int(args["tri_budget"]) * ADDED_PART_SHARE), 3000)
+    part_tris = blib.tri_count(p)
+    if part_tris > part_budget:
+        mod = p.modifiers.new("dec_part", "DECIMATE")
+        mod.ratio = part_budget / float(part_tris)
+        mod.use_collapse_triangulate = True
+        blib.select_only([p])
+        bpy.ops.object.modifier_apply(modifier="dec_part")
+    vg = p.vertex_groups.new(name=ADDED_GROUP)
+    vg.add(list(range(len(p.data.vertices))), 1.0, "REPLACE")
     # old faces shrink toward the box centre
     loop_start = np.empty(n, np.int32); me.polygons.foreach_get("loop_start", loop_start)
     loop_total = np.empty(n, np.int32); me.polygons.foreach_get("loop_total", loop_total)
@@ -2149,7 +2179,132 @@ def fit_part(obj, faces, glb, name):
     return {"scale": round(float(sc), 3), "box_m": [round(float(v), 3) for v in ext_p], "faces_replaced": int(faces.sum())}
 
 
-def attach_part(obj, faces, glb, name, place="inside", size_m=0.0, yaw=0, blend=None):
+ADDED_GROUP = "ms_added"          # vertex group marking added parts: the LOD decimation spares them
+ADDED_PART_SHARE = 0.3            # of the triangle budget, at most, for ALL added parts together (four parts at 30%
+                                  # each starved the Havoc's body down to 646 faces, 2026-09-24)
+ADDED_MATERIALS = set()           # material names of the parts attached so far: not "body" for the next part's floor
+
+
+def part_budgets(parts, budget):
+    """Each part's slice of the added-parts share, by its longest dimension (a 2.3 m shell needs more triangles than a
+    0.45 m pedal set), never under 3,000."""
+    sizes = [max(float(p.get("size_m") or 0), 0.3) for p in parts]
+    total = sum(sizes) or 1.0
+    return [max(3000, int(budget * ADDED_PART_SHARE * s / total)) for s in sizes]
+
+
+def protect_added(mod, o):
+    """The decimate modifier spends its collapses on the body, not on an added part (vertex group weight 1 -> cost x10)."""
+    if ADDED_GROUP in o.vertex_groups:
+        mod.vertex_group = ADDED_GROUP
+        mod.invert_vertex_group = True
+        mod.vertex_group_factor = 10.0
+
+
+def cavity_floor(obj, faces, cen, lo_p, hi_p, ext_p):
+    """The floor under a glass anchor: the highest dense 0.2 m layer of body faces (not glass, not added parts) under
+    the footprint, never deeper below the glass than the canopy is tall. -> (z, note) or (None, None)."""
+    n = len(obj.data.polygons)
+    mat_idx = np.empty(n, np.int32)
+    obj.data.polygons.foreach_get("material_index", mat_idx)
+    added_slots = [i for i, sl in enumerate(obj.material_slots) if sl.material and sl.material.name in ADDED_MATERIALS]
+    not_added = ~np.isin(mat_idx, added_slots) if added_slots else np.ones(n, bool)
+    body_sel = (~faces) & not_added & (cen[:, 0] > lo_p[0] + 0.1 * ext_p[0]) & (cen[:, 0] < hi_p[0] - 0.1 * ext_p[0]) \
+        & (np.abs(cen[:, 1] - (lo_p[1] + hi_p[1]) * 0.5) < 0.4 * ext_p[1]) \
+        & (cen[:, 2] < lo_p[2]) & (cen[:, 2] >= lo_p[2] - 1.0 * ext_p[2])
+    if body_sel.sum() < 30:
+        return None, None
+    zs = cen[body_sel][:, 2]
+    step = max(0.2, 0.08 * ext_p[2])
+    edges = np.arange(zs.min(), lo_p[2] + step, step)
+    counts, _ = np.histogram(zs, bins=edges)
+    dense = [i for i, c in enumerate(counts) if c >= 0.15 * len(zs)]
+    top_band = max(dense) if dense else int(np.argmax(counts))
+    floor_z = max(float(edges[top_band + 1]), lo_p[2] - 0.6 * ext_p[2])
+    return floor_z, "cavity floor %.2f m under a glass edge at %.2f m (%d body faces, densest layer)" % (floor_z, lo_p[2], int(body_sel.sum()))
+
+
+def line_cavity(obj, glass, floor_z):
+    """Enclose the cabin: the hull is one skin, so through the glass one looked past the seat into the fuselage void
+    (the Havoc, 2026-09-24). Walls drop from the glass rim to the cavity floor and a floor caps them, all facing into
+    the cabin, in a dark matte material. Deterministic; no vendor."""
+    me = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    # the weight layer first: adding a layer reallocates every vertex and kills the references taken before it
+    # ("BMVert has been removed" on the Havoc, whose mesh had no vertex groups yet, 2026-09-24)
+    deform = bm.verts.layers.deform.verify()
+    bm.faces.ensure_lookup_table()
+    bm.verts.ensure_lookup_table()
+    nf = len(bm.faces)
+    g = np.zeros(nf, bool)
+    g[:min(nf, len(glass))] = np.asarray(glass, bool)[:nf]
+    rim = []
+    for e in bm.edges:
+        fs = e.link_faces
+        if len(fs) == 2 and g[fs[0].index] != g[fs[1].index]:
+            rim.append(e)
+        elif len(fs) == 1 and g[fs[0].index]:
+            rim.append(e)
+    if len(rim) < 8:
+        bm.free()
+        return {"skipped": "no glass rim"}
+    rim_verts = {v.index: v for e in rim for v in e.verts}
+    xy = np.array([[v.co.x, v.co.y] for v in rim_verts.values()], np.float64)
+    c = xy.mean(axis=0)
+    zr = float(np.mean([v.co.z for v in rim_verts.values()]))
+    if floor_z is None or floor_z >= zr - 0.05:
+        floor_z = zr - 0.5
+    mat = bpy.data.materials.new("MI_%s_CabinLining" % NAME)
+    mat.use_nodes = True
+    b = next(nd for nd in mat.node_tree.nodes if nd.type == "BSDF_PRINCIPLED")
+    b.inputs["Base Color"].default_value = (0.05, 0.05, 0.055, 1.0)
+    b.inputs["Roughness"].default_value = 0.8
+    me.materials.append(mat)
+    slot = len(me.materials) - 1
+    vg = obj.vertex_groups.get(ADDED_GROUP) or obj.vertex_groups.new(name=ADDED_GROUP)
+    below = {}
+    for vi, v in rim_verts.items():
+        nx, ny = c + (np.array([v.co.x, v.co.y]) - c) * 0.97      # a hair inside the rim: the wall stays in the hull
+        nv = bm.verts.new((float(nx), float(ny), float(floor_z)))
+        nv[deform][vg.index] = 1.0
+        below[vi] = nv
+    walls = []
+    for e in rim:
+        a, bb = e.verts
+        try:
+            walls.append(bm.faces.new((a, bb, below[bb.index], below[a.index])))
+        except ValueError:
+            pass
+    newset = set(below.values())
+    bottom = [e for e in bm.edges if e.verts[0] in newset and e.verts[1] in newset and len(e.link_faces) == 1]
+    floor = []
+    try:
+        floor = list(bmesh.ops.holes_fill(bm, edges=bottom, sides=0).get("faces", []))
+    except Exception:  # noqa: BLE001
+        floor = []
+    if not floor:
+        try:
+            floor = list(bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=False, edges=bottom).get("geom", []))
+            floor = [f for f in floor if isinstance(f, bmesh.types.BMFace)]
+        except Exception:  # noqa: BLE001
+            floor = []
+    bm.normal_update()
+    cc = Vector((float(c[0]), float(c[1]), (zr + floor_z) * 0.5))
+    for f in walls + floor:
+        f.material_index = slot
+        f.smooth = False
+        if (cc - f.calc_center_median()).dot(f.normal) < 0:
+            f.normal_flip()
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    ADDED_MATERIALS.add(mat.name)
+    return {"walls": len(walls), "floor_faces": len(floor), "rim_vertices": len(rim_verts), "rim_z_mean": round(zr, 3),
+            "floor_z": round(float(floor_z), 3)}
+
+
+def attach_part(obj, faces, glb, name, place="inside", size_m=0.0, yaw=0, blend=None, offset=(0.0, 0.0, 0.0), part_budget=None):
     """Import a separately seeded part and put it where the brief said, relative to the anchor faces' box: inside
     (scaled to fit the box), on_top / below (resting on the box's top / hanging under its bottom), in_front /
     behind (butted against its +X / -X end). size_m sets the part's longest dimension; 0 fits it to the box.
@@ -2168,6 +2323,13 @@ def attach_part(obj, faces, glb, name, place="inside", size_m=0.0, yaw=0, blend=
     ext_p = hi_p - lo_p
     if ext_p.max() < 1e-4:
         return {"skipped": "degenerate anchor box"}
+    # inside a canopy: the floor is the body's cavity floor under the glass footprint, not the glass's lower edge. The
+    # Havoc's interior stood on the sill line with the cabin hollow for 0.9 m beneath it (2026-09-24). The floor is the
+    # lowest body faces under the footprint, never deeper below the glass than the canopy is tall (a closed canopy has
+    # no cavity: those faces would be the belly).
+    floor_z, floor_note = None, None
+    if place == "inside" and faces is not None and faces.sum() >= 3:
+        floor_z, floor_note = cavity_floor(obj, faces, cen, lo_p, hi_p, ext_p)
     before = set(bpy.data.objects)
     prepared = bool(blend) and os.path.exists(blend)
     if prepared:
@@ -2219,7 +2381,8 @@ def attach_part(obj, faces, glb, name, place="inside", size_m=0.0, yaw=0, blend=
     cx, cy, cz = (lo_p + hi_p) * 0.5
     pcx, pcy, pcz = (plo.x + phi.x) * 0.5, (plo.y + phi.y) * 0.5, (plo.z + phi.z) * 0.5
     if place == "inside":
-        target = (cx, cy, lo_p[2] + (phi.z - plo.z) * 0.5)                 # floor of the box
+        base = floor_z + 0.02 * ext_p[2] if floor_z is not None else lo_p[2]
+        target = (cx, cy, base + (phi.z - plo.z) * 0.5)                    # standing on the cavity floor (else the glass edge)
     elif place == "on_top":
         target = (cx, cy, hi_p[2] + (phi.z - plo.z) * 0.5)
     elif place == "below":
@@ -2228,18 +2391,36 @@ def attach_part(obj, faces, glb, name, place="inside", size_m=0.0, yaw=0, blend=
         target = (hi_p[0] + (phi.x - plo.x) * 0.5, cy, cz)
     else:  # behind
         target = (lo_p[0] - (phi.x - plo.x) * 0.5, cy, cz)
-    p.location += Vector((target[0] - pcx, target[1] - pcy, target[2] - pcz))
+    ox, oy, oz = [float(v or 0) for v in (list(offset) + [0, 0, 0])[:3]]      # forward, left, up from the placement
+    p.location += Vector((target[0] - pcx + ox, target[1] - pcy + oy, target[2] - pcz + oz))
     bpy.ops.object.transform_apply(location=True)
     for slot in p.material_slots:
         if slot.material:
             slot.material.name = "MI_%s_%s" % (NAME, name)
+            ADDED_MATERIALS.add(slot.material.name)
     p.name = name
+    # the part's share of the triangle budget: a 155k-triangle cockpit interior joined to a 280k body and decimated to
+    # 120k as one mesh lost its joystick, throttles and harness (the Havoc, 2026-09-24). It is reduced on its own to
+    # at most ADDED_PART_SHARE of the budget, and its vertices are marked so the LOD passes decimate the body instead.
+    part_budget = int(part_budget or max(int(int(args["tri_budget"]) * ADDED_PART_SHARE), 3000))
+    part_tris = blib.tri_count(p)
+    if part_tris > part_budget:
+        mod = p.modifiers.new("dec_part", "DECIMATE")
+        mod.ratio = part_budget / float(part_tris)
+        mod.use_collapse_triangulate = True
+        blib.select_only([p])
+        bpy.ops.object.modifier_apply(modifier="dec_part")
+    vg = p.vertex_groups.new(name=ADDED_GROUP)
+    vg.add(list(range(len(p.data.vertices))), 1.0, "REPLACE")
     faces_added = int(len(p.data.polygons))
+    tris_kept = blib.tri_count(p)
     blib.select_only([obj, p])
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.join()                     # p is gone after this; read nothing from it
-    return {"place": place, "yaw": yaw, "scale": round(float(sc), 3), "size_m": [round(float(v), 3) for v in (phi - plo)],
-            "anchor_box_m": [round(float(v), 3) for v in ext_p], "faces_added": faces_added}
+    return {"place": place, "yaw": yaw, "offset_m": [ox, oy, oz], "scale": round(float(sc), 3),
+            "size_m": [round(float(v), 3) for v in (phi - plo)],
+            "anchor_box_m": [round(float(v), 3) for v in ext_p], "faces_added": faces_added, "floor": floor_note,
+            "triangles": {"seed": int(part_tris), "kept": int(tris_kept), "share_of_budget": int(part_budget)}}
 
 
 if cyl_faces_each and args.get("repair_cylinders"):
@@ -2258,7 +2439,28 @@ if cyl_faces_each and args.get("repair_cylinders"):
         except Exception as exc:  # noqa: BLE001
             log("cylinder repair failed: %s" % str(exc)[:200])
 
-for ap in (args.get("add_parts") or []):
+_part_budgets = part_budgets(args.get("add_parts") or [], int(args["tri_budget"]))
+_cabin_lined = False
+for _pi, ap in enumerate(args.get("add_parts") or []):
+    if ap.get("anchor") == "glass" and ap.get("place", "inside") == "inside" and glass_faces is not None \
+            and glass_faces.sum() >= 3 and not _cabin_lined:
+        _cabin_lined = True
+        try:
+            _n = len(ob.data.polygons)
+            _cen = np.empty(_n * 3, np.float32)
+            ob.data.polygons.foreach_get("center", _cen)
+            _cen = _cen.reshape(-1, 3)
+            _gf = np.concatenate([glass_faces, np.zeros(max(0, _n - len(glass_faces)), bool)])[:_n]
+            _pts = main_cluster(_cen[_gf], max(blib.dims(ob)[1].length * 0.02, 1e-3))
+            _lo, _hi = np.percentile(_pts, 2, axis=0), np.percentile(_pts, 98, axis=0)
+            _fz, _ = cavity_floor(ob, _gf, _cen, _lo, _hi, _hi - _lo)
+            res = line_cavity(ob, _gf, _fz)
+            report["cabin_lining"] = res
+            log("cabin lining: %s" % json.dumps(res))
+            raw_tris = blib.tri_count(ob)
+        except Exception as exc:  # noqa: BLE001 - the parts still go in
+            import traceback as _tb
+            log("cabin lining failed: %s | %s" % (str(exc)[:200], " / ".join(_tb.format_exc().strip().splitlines()[-4:])[:400]))
     # the anchor: glass faces, the whole body, or the faces under the anchor phrase's masks
     if ap.get("anchor") == "glass":
         f = glass_faces
@@ -2272,12 +2474,17 @@ for ap in (args.get("add_parts") or []):
             f = None
     if f is not None and len(f) != len(ob.data.polygons):
         f = np.concatenate([f, np.zeros(max(0, len(ob.data.polygons) - len(f)), bool)])[:len(ob.data.polygons)]
-    if not os.path.exists(ap.get("glb", "")):
+    if ap.get("place", "inside") == "inside" and ap.get("anchor") != "body" and (f is None or f.sum() < 3):
+        log("WARNING: add %s skipped: interior anchor '%s' not found; refusing to fit against the whole body" %
+            (ap.get("name"), ap.get("anchor")))
+        continue
+    if not os.path.exists(ap.get("glb") or "") and not os.path.exists(ap.get("blend") or ""):
         log("add %s: no seed mesh" % ap.get("name"))
         continue
     try:
         res = attach_part(ob, f, ap["glb"], ap.get("name", "Part"), ap.get("place", "inside"), float(ap.get("size_m") or 0),
-                          yaw=int(ap.get("yaw") or 0), blend=ap.get("blend"))
+                          yaw=int(ap.get("yaw") or 0), blend=ap.get("blend"), offset=ap.get("offset_m") or (0, 0, 0),
+                          part_budget=_part_budgets[_pi])
         report.setdefault("added_parts", []).append({"name": ap.get("name"), "phrase": ap.get("phrase"), **res})
         log("added %s: %s" % (ap.get("name"), json.dumps(res)))
         raw_tris = blib.tri_count(ob)
@@ -2310,7 +2517,8 @@ for ps in (args.get("part_seeds") or []):
         log("part seed %s failed: %s" % (ps.get("name"), str(exc)[:200]))
 
 # ---------------------------------------------------------------- LODs (material indices and face attributes survive decimation)
-def decimate_copy(src, ratio, name):
+def decimate_copy(src, ratio, name, protect=True):
+    """protect: spare the added parts (LOD0). The lower LODs shrink everything, or LOD2 cannot reach its count."""
     o = src.copy()
     o.data = src.data.copy()
     o.name = name
@@ -2320,11 +2528,20 @@ def decimate_copy(src, ratio, name):
         mod = o.modifiers.new("dec", "DECIMATE")
         mod.ratio = ratio
         mod.use_collapse_triangulate = True
+        if protect:
+            protect_added(mod, o)
         blib.select_only([o])
         bpy.ops.object.modifier_apply(modifier="dec")
     return o
 
 
+# Use the same tangent basis for baking and delivery. Smoothing only AFTER the bake encodes flat
+# triangle normals into a texture and then displays that texture on a smooth mesh.
+if "smooth_organic_normals" in TEXTURE_FIXES:
+    report.setdefault("normal_repairs", []).append(smooth_organic_normals(ob))
+for polygon in ob.data.polygons:
+    polygon.use_smooth = True
+ob.data.update()
 budget = int(args["tri_budget"])
 lod0 = decimate_copy(ob, min(1.0, budget / float(max(raw_tris, 1))), "SM_%s_LOD0" % NAME)
 # collapse decimation counts faces, and n-gons triangulate to more than one; and it refuses non-manifold edges, of which a
@@ -2346,9 +2563,23 @@ for _pass in range(3):
     mod = lod0.modifiers.new("dec2", "DECIMATE")
     mod.ratio = max(0.05, budget / float(have) * 0.98)
     mod.use_collapse_triangulate = True
+    if _pass < 2:
+        protect_added(mod, lod0)          # the last pass shrinks everything: the budget is a promise
     blib.select_only([lod0])
     bpy.ops.object.modifier_apply(modifier="dec2")
     log("LOD0 decimated again: %d -> %d triangles for a budget of %d" % (have, blib.tri_count(lod0), budget))
+
+
+if "smooth_organic_normals" in TEXTURE_FIXES:
+    report.setdefault("normal_repairs", []).append(smooth_organic_normals(lod0))
+
+# the collapse leaves specks of its own (a dot under the bullpup's rail that no segmenter could target, 2026-09-25)
+try:
+    _lod0_specks = drop_floaties(lod0)
+    if _lod0_specks:
+        report["floaties_removed_lod0"] = _lod0_specks
+except Exception as exc:  # noqa: BLE001 - a speck is not worth a failed build
+    log("LOD0 floater pass skipped: %s" % str(exc)[:120])
 
 
 def bake_detail(high, low):
@@ -2520,7 +2751,33 @@ def apply_bake(low, baked):
     return stats
 
 
-if args.get("bake_detail", True):
+_used_slots = {p.material_index for p in lod0.data.polygons}
+
+
+def atlas_domains(obj, used_slots):
+    """One entry per distinct base-colour IMAGE among the used materials. The finish's own materials (the glass slot,
+    a repaired barrel's flat colour, a recoloured family) share the body's atlas and must not stop the bake: on the
+    bullpup (2026-09-25) glass + barrel + body counted as three "domains" and no build ever got its normal map.
+    Only a joined vendor part brings an atlas of its own, and it shows up here as a second image."""
+    images, names = [], []
+    for i in sorted(used_slots):
+        if i >= len(obj.material_slots) or not obj.material_slots[i].material:
+            continue
+        m = obj.material_slots[i].material
+        names.append(m.name)
+        bsdf = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None) if m.node_tree else None
+        node = image_feeding(bsdf.inputs["Base Color"])[0] if bsdf is not None else None
+        if node is not None and getattr(node, "image", None) is not None and node.image.name not in images:
+            images.append(node.image.name)
+    return images or names[:1], names
+
+
+_material_domains, _material_names = atlas_domains(lod0, _used_slots)
+_bake_skip = detail_bake_skip_reason(_material_domains, "preserve_seed_maps" in TEXTURE_FIXES)
+if args.get("bake_detail", True) and _bake_skip:
+    report["bake"] = {"status": "skipped", "reason": _bake_skip, "material_domains": _material_domains, "materials": _material_names}
+    log("detail bake skipped: " + _bake_skip + "; preserving source texture maps")
+elif args.get("bake_detail", True):
     try:
         baked = bake_detail(ob, lod0)
         if baked:
@@ -2570,7 +2827,7 @@ def harmonise_second_model(obj):
     return {"gain": [round(float(g), 3) for g in gain], "applied": True}
 
 
-if args.get("reproject") and args.get("reference"):
+if args.get("reproject") and args.get("reference") and "preserve_seed_maps" not in TEXTURE_FIXES:
     try:
         import reproject as reproject_mod
         rp = reproject_mod.run_with_work(lod0, probe, decision, args["reference"], PROBE_TO_NOW, WORK, log)
@@ -2591,10 +2848,12 @@ except Exception as exc:  # noqa: BLE001
     log("colour harmonisation skipped: %s" % str(exc)[:120])
 
 export_maps(lod0)
-lod1 = decimate_copy(lod0, 0.5, "SM_%s_LOD1" % NAME)
-lod2 = decimate_copy(lod1, 0.5, "SM_%s_LOD2" % NAME)
+lod1 = decimate_copy(lod0, 0.5, "SM_%s_LOD1" % NAME, protect=False)
+lod2 = decimate_copy(lod1, 0.5, "SM_%s_LOD2" % NAME, protect=False)
 bpy.data.objects.remove(ob, do_unlink=True)
 for i, o in enumerate((lod0, lod1, lod2)):
+    if i > 0 and "smooth_organic_normals" in TEXTURE_FIXES:
+        report.setdefault("normal_repairs", []).append(smooth_organic_normals(o))
     for p in o.data.polygons:
         p.use_smooth = True
     report["lods"].append({"lod": i, "triangles": blib.tri_count(o)})
@@ -2697,6 +2956,55 @@ blib.setup_render(int(args.get("render_size", 768)), 48, look="preview")
 stage = blib.Stage(lod0, extra_hidden=[hull] + sk_objects)
 report["renders"] = [stage.render(v, os.path.join(OUT, "preview_%s.png" % v))["file"] for v in ("iso", "side", "front")]
 stage.close()
+
+# Havoc's 2 m cockpit disappeared in the 12.5 m aircraft's review thumbnails. Review the delivered LOD0
+# close-up, with its real glass/hull intact: occlusion must be reported as unverified, not hidden for a pass.
+if (args.get("spec") or {}).get("add_parts") or (args.get("spec") or {}).get("cockpit") or args.get("add_parts"):
+    try:
+        slots = {i for i, slot in enumerate(lod0.material_slots) if slot.material and (
+            slot.material.name in ADDED_MATERIALS or slot.material.name.startswith("MI_%s_Cockpit" % NAME))}
+        indices = {vi for poly in lod0.data.polygons if poly.material_index in slots for vi in poly.vertices}
+        if not indices:
+            log("WARNING: no requested assembly geometry remains on LOD0 for focused review")
+        else:
+            points = [lod0.matrix_world @ lod0.data.vertices[i].co for i in indices]
+            lo = Vector(tuple(min(p[i] for p in points) for i in range(3)))
+            hi = Vector(tuple(max(p[i] for p in points) for i in range(3)))
+            margin = max((hi - lo).length * 0.08, 0.02)
+            pad = Vector((margin, margin, margin))
+            focus = blib.Stage(lod0, extra_hidden=[hull] + sk_objects, focus_bounds=(lo - pad, hi + pad))
+            try:
+                report["review_renders"] = [focus.render(v, os.path.join(OUT, "preview_assembly_%s.png" % v))["file"]
+                                           for v in ("iso", "top")]
+                report["renders"].extend(report["review_renders"])
+            finally:
+                focus.close()
+            # Diagnostic view only: glass is removed from a disposable copy, never the exported asset.
+            inspect = lod0.copy()
+            inspect.data = lod0.data.copy()
+            bpy.context.collection.objects.link(inspect)
+            try:
+                glass_slots = {i for i, s in enumerate(inspect.material_slots)
+                               if s.material and s.material.name.startswith("MI_%s_Glass" % NAME)}
+                bm = bmesh.new()
+                try:
+                    bm.from_mesh(inspect.data)
+                    bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.material_index in glass_slots], context="FACES")
+                    bm.to_mesh(inspect.data)
+                finally:
+                    bm.free()
+                inspection_stage = blib.Stage(inspect, focus_bounds=(lo - pad, hi + pad))
+                try:
+                    report["inspection_renders"] = [inspection_stage.render(
+                        "top", os.path.join(OUT, "preview_inspection_canopy_hidden.png"))["file"]]
+                finally:
+                    inspection_stage.close()
+            finally:
+                inspect_mesh = inspect.data
+                bpy.data.objects.remove(inspect, do_unlink=True)
+                bpy.data.meshes.remove(inspect_mesh)
+    except Exception as exc:  # a missing review view blocks acceptance, not delivery of the files
+        log("WARNING: focused assembly renders failed: %s" % str(exc)[:200])
 
 # ---------------------------------------------------------------- exports
 fbx_kw = dict(use_selection=True, apply_unit_scale=True, apply_scale_options="FBX_SCALE_NONE", axis_forward="-Z",

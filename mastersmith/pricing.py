@@ -8,6 +8,7 @@ from . import config
 FAL_PRICES = {
     "fal-ai/patina": 0.12,                       # $0.01 + $0.01 per megapixel per map; 5 maps at 2K ~ $0.21 (issue #7)
     "hitem3d/hi3d/v3.0/image-to-3d": 2.10,       # fal: $0.02/credit, 2048quality geometry + texture 10 + pbr 5 = $2.10 (master $9.10)
+    "hitem3d/hi3d/v3.0/multi-view-to-3d": 2.10,  # fal: same credits as the single-image endpoint (2026-09-25)
     "fal-ai/hitem3d/image-to-3d": 0.50,          # CALIBRATE: fal shows no fixed price; Hitem3D 1536pro list price (issue #6)
     "fal-ai/meshy/v7/image-to-3d": 0.05,         # inferred from wave 17's measured spend (2026-09-18): the whole wave
                                                  # came in $2.63 UNDER the table with five of these rows at 0.40; the
@@ -140,6 +141,8 @@ SEED_VENDORS = [
      "note": "1536-voxel geometry from one picture"},
     {"key": "hitem3d3", "label": "Hitem3D v3 (2048)", "model": "hitem3d/hi3d/v3.0/image-to-3d", "multiview": False,
      "note": "crispest geometry, the best high-poly source for baking, one picture, dear"},
+    {"key": "hitem3d3mv", "label": "Hitem3D v3 multi-view (2048)", "model": config.SEED_HI3D_MULTIVIEW, "multiview": True,
+     "note": "the same crisp geometry seeded from every approved angle (front, sides, back), same price"},
 ]
 
 
@@ -195,7 +198,7 @@ def estimate(spec):
                           REPAINT_PICTURES * image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD))
         else:
             steps.append(("hybrid repaint of the seed (Meshy retexture, original UVs)", price(config.RETEXTURE_MODEL)))
-    if spec.category in config.HARD_SURFACE_CATEGORIES and (spec.premium or spec.tri_budget >= 150000):
+    if spec.category in config.HARD_SURFACE_CATEGORIES and (spec.part_seeds or spec.tri_budget >= 150000):
         steps.append(("separately seeded parts (up to 2: picture + seed each)", 2 * (image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD
                       + price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"}))))
     if getattr(spec, "cockpit", False):
@@ -212,8 +215,11 @@ def estimate(spec):
     steps.append(("Blender finish: decimate, orient, scale, LODs, collision, maps, FBX/GLB", 0.0))
     steps.append(("review the result against the picture (vision)", LLM_CALL_ALLOWANCE_USD))
     for part in (getattr(spec, "add_parts", None) or []):
-        steps.append(("added part %s: picture + seed" % part.get("name", "?"),
-                      image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD + price(config.SEED_MODEL, seed_payload)))
+        if part.get("seed"):
+            steps.append(("added part %s: fit the seed already bought (facing check)" % part.get("name", "?"), LLM_CALL_ALLOWANCE_USD))
+        else:
+            steps.append(("added part %s: picture + seed" % part.get("name", "?"),
+                          image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD + price(config.SEED_MODEL, seed_payload)))
     steps.append(("director chat overhead", 2 * LLM_CALL_ALLOWANCE_USD))
     total = round(sum(u for _, u in steps), 4)
     return {"steps": steps, "usd": total, "credits": config.credits_for_usd(total)}

@@ -37,7 +37,7 @@ Then the chat, in a second terminal:
 cd web
 npm ci
 cp .env.example .env.local
-npm run dev                                           # http://localhost:3000
+npm run dev                                           # http://localhost:3000 (this machine only)
 ```
 
 Describe an asset:
@@ -106,6 +106,10 @@ cp .env.example .env            # keys
 docker compose up --build       # API on :8080 (with Blender inside), chat on :3000
 ```
 
+Both ports are published on 127.0.0.1 only: the chat spends your provider credit. To reach it from another machine,
+set `MASTERSMITH_WEB_PASSWORD` in `.env` (the chat then asks for it) and change the `web` port mapping in
+`docker-compose.yml`; keep the API itself private.
+
 Builds, uploads and the spend ledger persist in the `mastersmith-data` volume. Blender's Cycles renders and
 decimation are CPU-bound: give the API container cores and 8 GB.
 
@@ -127,7 +131,8 @@ own when Docker restarts after a reboot; stopped ones stay stopped until you sta
    photograph of the real thing found on the web when you name it (an F-150, a Glock 17). A vision model checks
    it: one object, plain background, right view. Weapons and vehicles get extra views for multiview seeding.
 2. **3D seed.** Tripo H3.1 with detailed geometry and HD textures by default; Meshy v7 and Hitem3D are wired in as
-   alternatives (`MASTERSMITH_SEED_MODEL`). The vendor mesh is the asset; nothing sculpts it afterwards.
+   alternatives (`MASTERSMITH_SEED_MODEL`). Hitem3D v3 comes in two flavours at the same price: one picture
+   (`hitem3d3`) or every approved angle in its named front / left / back / right slots (`hitem3d3mv`). The vendor mesh is the asset; nothing sculpts it afterwards.
 3. **Blender finish** (headless, free) in two passes around a decision step:
    - *prepare*: join, long axis to +X (or +Z up for characters), scale to real metres, origin, probe renders;
    - *decide*: the vision model says which probe shows the front; SAM 3 returns masks for glass, wheels and
@@ -214,6 +219,8 @@ tests/                     pure tests; a Blender test behind MASTERSMITH_BLENDER
 A skill is a Markdown file in `mastersmith/skills/` with `reference_view`, `second_view`, `mirror_as_third_view`,
 `forward_axis` (long|up), `origin` (bottom|center) in the front matter, plus optional `glass_prompt`,
 `rig_parts_prompt`, `material_families`, `repair_cylinders` and `part_seeds` lists the probe turns into SAM masks.
+Part seeds run on hero budgets (150k+ triangles) or when the brief sets `part_seeds`, never on `premium` alone, and
+only for a part the brief allows and the reference shows; each takes a slice of the triangle budget like an added part.
 A new fal endpoint needs a row in `pricing.FAL_PRICES` and a call site in a stage; nothing else.
 
 ## License

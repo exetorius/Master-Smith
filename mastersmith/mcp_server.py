@@ -61,9 +61,12 @@ def set_brief(name: str, description: str, category: str, style: str = "realisti
               research: bool | None = None, single_picture: bool | None = None, premium: bool = False, glass: bool | None = None,
               rig: bool | None = None, notes: str = "", edit_instructions: str = "", retexture: bool = False,
               retexture_parts: list[dict] | None = None, protect_parts: list[dict] | None = None,
-              texture_fixes: list[str] | None = None, remove_parts: list[str] | None = None) -> str:
+              texture_fixes: list[str] | None = None, remove_parts: list[str] | None = None,
+              add_parts: list[dict] | None = None) -> str:
     """Set or update the build brief. Returns the brief as understood and the worst-case estimate."""
     args = {k: v for k, v in locals().items() if v not in (None, "", 0, 0.0, False, [])}
+    if add_parts is not None:
+        args["add_parts"] = add_parts  # [] deliberately removes earlier additions on the next re-finish
     return _tool("set_brief", args)
 
 
@@ -92,6 +95,12 @@ def import_model(path: str, name: str, category: str, description: str = "", eng
 def job_status(job_id: str = "") -> str:
     """Status, log tail and results of a queued or finished job (the last one when job_id is empty)."""
     return _tool("job_status", {"job_id": job_id} if job_id else {})
+
+
+@server.tool()
+def plan_repair(job_id: str = "") -> str:
+    """Read a completed job and propose targeted repair edits. No building or generation fees."""
+    return _tool("plan_repair", {"job_id": job_id} if job_id else {})
 
 
 @server.tool()

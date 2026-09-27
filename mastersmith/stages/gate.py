@@ -2,6 +2,7 @@
 folder that is missing a map or is ten times the wrong size without being told. Warnings, not refusals:
 the asset still ships, the report says what to look at."""
 import os
+from ..quality import assess
 
 
 def check(spec, report, review, delivery_dir):
@@ -35,9 +36,10 @@ def check(spec, report, review, delivery_dir):
             warnings.append("missing file %s" % f)
     if spec.glass and not report.get("glass"):
         warnings.append("glass was requested but no glass region was found")
-    if review and (review.get("score") or 0) < 5:
-        warnings.append("reviewer scored %s/10: %s" % (review.get("score"), "; ".join(review.get("issues", [])[:3])))
     rm = report.get("roughness_mean")
     if rm is not None and rm < 0.3:
         warnings.append("surface still very glossy (roughness %.2f)" % rm)
-    return {"ok": not warnings, "warnings": warnings}
+    technical_ok = not warnings
+    quality = assess(spec, report, review)
+    warnings.extend(quality["issues"])
+    return {"ok": not warnings, "technical_ok": technical_ok, "quality": quality, "warnings": warnings}

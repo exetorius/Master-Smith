@@ -10,6 +10,7 @@ import requests
 from PIL import Image
 
 from ..llm import extract_json
+from ..netsafe import UnsafeURL, get_public
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; MasterSmith/0.1; +https://github.com/kevinpbuckley/Master-Smith)"}
 MIN_EDGE = 320
@@ -41,6 +42,7 @@ def relevant_to(query, row):
 
 
 def public_url(url):
+    """A cheap first filter on search rows, by name only; fetch_image checks the address the host resolves to."""
     try:
         from urllib.parse import urlparse
         p = urlparse(url)
@@ -115,13 +117,13 @@ def image_search(query, count=12, log=print):
 def fetch_image(url, log=print, max_bytes=12 * 1024 * 1024):
     """(PIL image, bytes) fetched by us, or (None, None). Sniffs the bytes, never trusts the extension."""
     try:
-        r = requests.get(url, headers=HEADERS, timeout=20, stream=True)
-        if r.status_code != 200:
-            return None, None
-        data = r.raw.read(max_bytes + 1, decode_content=True)
+        with get_public(url, headers=HEADERS, timeout=20) as r:
+            if r.status_code != 200:
+                return None, None
+            data = r.raw.read(max_bytes + 1, decode_content=True)
         if len(data) > max_bytes or len(data) < 12:
             return None, None
-    except requests.RequestException:
+    except (requests.RequestException, UnsafeURL):
         return None, None
     if not (data[:8] == b"\x89PNG\r\n\x1a\n" or data[:2] == b"\xff\xd8" or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")):
         return None, None

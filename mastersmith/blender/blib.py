@@ -107,10 +107,10 @@ class Stage:
     """Temporary lights + camera around `target`; render named views; report camera parameters so a
     later pass can project image-space masks back onto faces."""
 
-    def __init__(self, target, extra_hidden=(), look=None):
+    def __init__(self, target, extra_hidden=(), look=None, focus_bounds=None):
         self.target = target
         look = look or bpy.context.scene.get("ms_look", "probe")
-        lo, hi = dims(target)
+        lo, hi = focus_bounds if focus_bounds is not None else dims(target)
         self.centre = (lo + hi) * 0.5
         self.radius = max((hi - lo).length * 0.5, 1e-4)
         self.temps = []

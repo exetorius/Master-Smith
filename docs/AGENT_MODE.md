@@ -50,6 +50,41 @@ codex mcp add master-smith -- python -m mastersmith mcp
 with `MASTERSMITH_API_URL` (and `MASTERSMITH_API_KEY`, `MASTERSMITH_SESSION`) in the environment Codex starts from.
 Then tell Codex: "Call director_prompt and act as the Master Smith director. I want a wooden barrel, 1 m, Unreal."
 
+## Repair acceptance
+
+The director distinguishes a completed job from an accepted asset. `job_status.summary.quality` is the live
+quality assessment, including for older jobs whose stored gate incorrectly passed a `rebuild` verdict.
+A requested cabin or added assembly needs per-part visual evidence in `review.assembly_checks`, not just a
+successful join or a triangle count. Future finishes render `preview_assembly_iso.png` and
+`preview_assembly_top.png` from the delivered LOD0, keeping the hull and glass in place. Obscured detail is
+reported as unverified. Missing parts, missing close-ups and a rebuild verdict prevent visual acceptance;
+files remain available for inspection. `gate.technical_ok` reports packaging checks separately.
+
+Before another failed assembly rework, change a specific fit/geometry setting rather than repeating the same
+brief. Reuse bought parts; avoid generating a separate control already included in a cockpit module. In addition
+to `offset_m` and `size_m`, `add_parts[].yaw_degrees` can override the prepared part's facing with -180, -90, 0,
+90 or 180 degrees, without another facing-model call. Omit it for automatic facing. A missing interior anchor
+is reported, never silently replaced with the whole body's bounds. These safeguards do not repair existing
+models retroactively or start paid jobs automatically.
+
+### Targeted repair planning
+
+`plan_repair` reads a completed job and proposes concrete brief edits without spending. For Havoc-style failures,
+it prioritizes preserving a clean seed's maps, omitting redundant additions, and inspecting obscured controls;
+it does not automatically launch a build. `add_parts[].provides` inventories the components in a module
+(seat, panel, consoles, stick, pedals, floor, walls, bulkhead). The director checks for a loose control already
+included in a compound cockpit before spending. Part-generation prompts honor the requested exclusions.
+
+The finish preserves source normal/AO maps when multiple material UV domains make the shared-atlas baker unsafe.
+For an existing bad result, `texture_fixes: ["preserve_seed_maps"]` re-finishes its original seed without derived
+normal/AO baking or reference projection. Reviews receive the source seed preview and a separately labeled
+canopy-hidden diagnostic view: the cutaway proves internal geometry, not the delivered glass's appearance.
+
+For local debugging, `scripts/replay_finish.py SOURCE_JOB EMPTY_OUTPUT` replays only Blender with saved masks
+and purchased parts, making no provider calls. Use read-only source data and a separate diagnostic output. Optional
+`--omit-additions CabinShell Joystick` and `--preserve-seed-maps` allow isolated repair comparisons without
+replacing the original delivery or paying for another generation.
+
 ## What still costs money
 
 | Where | What | Paid by |

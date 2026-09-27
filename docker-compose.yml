@@ -13,7 +13,7 @@ services:
     volumes:
       - mastersmith-data:/data
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"    # this machine only: the API spends your provider credit
     # Cycles CPU renders and decimation want cores and memory; raise these on a big machine.
     deploy:
       resources:
@@ -26,8 +26,9 @@ services:
     environment:
       MASTERSMITH_API_URL: http://api:8080
       MASTERSMITH_API_KEY: ${MASTERSMITH_API_KEY:-}   # the fixed key from .env, if you set one
+      MASTERSMITH_WEB_PASSWORD: ${MASTERSMITH_WEB_PASSWORD:-}   # the chat asks for it when set (web/proxy.ts)
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"    # this machine only: the chat has no login of its own
     depends_on:
       - api
 

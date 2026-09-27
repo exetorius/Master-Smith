@@ -6,6 +6,7 @@ Deterministic where it can be; the only judgement calls are the two vision answe
 import json
 import os
 import subprocess
+import shutil
 
 from .. import config
 from .cockpit import make_cockpit
@@ -22,7 +23,7 @@ def _blender(job, script, args, tag):
     args_path = os.path.join(job.work_dir, "%s_args.json" % tag)
     with open(args_path, "w") as f:
         json.dump(args, f, indent=1)
-    cmd = [config.BLENDER_BIN, "-b", "--python", str(BLENDER_DIR / script), "--", args_path]
+    cmd = [config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", str(BLENDER_DIR / script), "--", args_path]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=2400)
     log_path = os.path.join(job.work_dir, "%s.log" % tag)
     with open(log_path, "w", encoding="utf-8") as f:
@@ -96,7 +97,8 @@ def run_finish(job, skill, seed_glb, reference=None, retexture_maps=None, recolo
             ap = make_added_part(job, spec, part, reference)
             if ap:
                 oriented = orient_added_part(job, spec, part, ap["glb"]) or {}
-                added.append({**ap, **oriented, "index": i, "place": part["place"], "anchor": part["anchor"], "size_m": part["size_m"]})
+                added.append({**ap, **oriented, "index": i, "place": part["place"], "anchor": part["anchor"], "size_m": part["size_m"],
+                              "offset_m": part.get("offset_m") or [0, 0, 0]})
         except Exception as exc:  # noqa: BLE001 - the body ships without the part
             job.log("  add part %s skipped: %s" % (part["name"], str(exc)[:160]))
     job.log("  Blender pass 2: glass slot%s, maps, LODs to %s tris, collision, export" % (
@@ -124,6 +126,12 @@ def run_finish(job, skill, seed_glb, reference=None, retexture_maps=None, recolo
     with open(report_path) as f:
         report = json.load(f)
     report["decision"] = decision
+    source_preview = os.path.join(job.work_dir, "probe_iso.png")
+    if os.path.exists(source_preview):
+        shutil.copy2(source_preview, os.path.join(common["out_dir"], "preview_seed_iso.png"))
+        report["source_renders"] = ["preview_seed_iso.png"]
+        with open(report_path, "w") as f:
+            json.dump(report, f, indent=1)
     if spec.category == "environment" and spec.style == "realistic" and reference and os.path.exists(reference):
         try:
             job.log("  tiling PBR material from the reference (Patina)")

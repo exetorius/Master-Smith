@@ -44,7 +44,7 @@ print("MADE", out)
 
 
 def blender(script_path, args_path):
-    r = subprocess.run([config.BLENDER_BIN, "-b", "--python", script_path, "--", args_path], capture_output=True, text=True, timeout=900)
+    r = subprocess.run([config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", script_path, "--", args_path], capture_output=True, text=True, timeout=900)
     assert r.returncode == 0, (r.stdout[-2000:], r.stderr[-1500:])
     return r.stdout
 
@@ -100,6 +100,11 @@ def test_add_parts_fits_a_seed_onto_the_body():
         rep = json.load(open(os.path.join(out, "report.json")))
         added = rep.get("added_parts") or []
         assert added and added[0]["name"] == "Rack" and added[0]["place"] == "on_top" and added[0]["faces_added"] > 0
+        assert rep["review_renders"] == ["preview_assembly_iso.png", "preview_assembly_top.png"]
+        assert all(os.path.exists(os.path.join(out, p)) for p in rep["review_renders"])
+        assert rep["bake"]["status"] == "skipped" and "UV domains" in rep["bake"]["reason"]
+        assert rep["inspection_renders"] == ["preview_inspection_canopy_hidden.png"]
+        assert os.path.exists(os.path.join(out, rep["inspection_renders"][0]))
         assert abs(max(added[0]["size_m"]) - 0.3) < 0.02                  # the spec's size wins
         assert rep["dimensions_m"][0] > 0.99                                # the body was not shrunk
         assert rep["dimensions_m"][2] > 0.08 + 0.03                         # taller: the rack sits on top

@@ -53,7 +53,7 @@ def rig_character(job, report):
         args_path = os.path.join(job.work_dir, "clean_rig_args.json")
         json.dump({"glb": os.path.join(delivery, "SK_%s.glb" % job.spec.name), "name": job.spec.name, "out_dir": delivery,
                    "skeleton": "ue5" if job.spec.engine == "unreal" else "vendor", "animations": anim_glbs}, open(args_path, "w"))
-        proc = subprocess.run([config.BLENDER_BIN, "-b", "--python", str(BLENDER_DIR / "clean_rig.py"), "--", args_path],
+        proc = subprocess.run([config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", str(BLENDER_DIR / "clean_rig.py"), "--", args_path],
                               capture_output=True, text=True, timeout=1200)
         with open(os.path.join(job.work_dir, "clean_rig.log"), "w", encoding="utf-8") as f:
             f.write((proc.stdout or "") + "\n--- stderr ---\n" + (proc.stderr or ""))
@@ -102,7 +102,7 @@ def rig_vehicle(job, report):
     args = {"name": job.spec.name, "out_dir": delivery, "parts_dir": parts_dir}
     args_path = os.path.join(job.work_dir, "rig_args.json")
     json.dump(args, open(args_path, "w"))
-    proc = subprocess.run([config.BLENDER_BIN, "-b", "--python", str(BLENDER_DIR / "rig_vehicle.py"), "--", args_path],
+    proc = subprocess.run([config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", str(BLENDER_DIR / "rig_vehicle.py"), "--", args_path],
                           capture_output=True, text=True, timeout=1800)
     with open(os.path.join(job.work_dir, "rig.log"), "w", encoding="utf-8") as f:
         f.write((proc.stdout or "") + "\n--- stderr ---\n" + (proc.stderr or ""))
