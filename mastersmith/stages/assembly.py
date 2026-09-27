@@ -385,11 +385,22 @@ def build_assembly(job, spec, ref):
         job.stage("parts")
         for r in rebuild:
             p = next((q for q in plan["parts"] if q["name"] == r.get("name")), None)
-            if p and p["method"] == "code":
-                p = {**p, "what": "%s. Fix: %s" % (p["what"], str(r.get("why"))[:300])}
-                b = build_code_part(job, spec, p, plan)
+            if not p:
+                continue
+            fixed = {**p, "what": "%s. Fix: %s" % (p["what"], str(r.get("why"))[:300])}
+            if p["method"] == "code":
+                b = build_code_part(job, spec, fixed, plan)
+            elif not built.get(p["name"], {}).get("redone"):
+                # a vendor part the check calls wrong is drawn and seeded once more, told what was wrong (the pistol's
+                # grip was flagged twice and nothing happened, 2026-09-27); once only, a seed costs real money
+                job.log("  part %s: the check calls its shape wrong; drawing and seeding it again" % p["name"])
+                b = build_vendor_part(job, spec, fixed, plan)
                 if b:
-                    built[p["name"]] = b
+                    b["redone"] = True
+            else:
+                b = None
+            if b:
+                built[p["name"]] = b
         job.stage("assemble")
     delivery, report = _assemble(job, spec, plan, built, "final", reference)
     report["assembly"] = record
