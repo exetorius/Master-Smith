@@ -531,12 +531,12 @@ class Kit:
         bm.free()
         return lo, hi
 
-    def bend(self, obj, degrees, along="X", toward="Z", fixed=None, segments=None):
+    def bend(self, obj, degrees, along="X", toward="Z", fixed=None, segments=None, axis=None):
         """Bend the piece so its length (along an axis) curves toward another axis, turning `degrees` in total: a
         banana magazine (along="Z", toward="X"), a drooping barrel, a curved grip. The cross-section at `fixed` (a
         coordinate along the axis; default the piece's middle) stays put; negative degrees curve the other way."""
         self._check(obj)
-        a, b = _axis(along), _axis(toward)
+        a, b = _axis(axis or along), _axis(toward)
         if a == b:
             raise KitError("bend: along and toward must be different axes")
         deg = float(degrees)
@@ -559,12 +559,12 @@ class Kit:
         obj.data.update()
         return obj
 
-    def taper(self, obj, scale, along="X", keep="min", segments=8):
+    def taper(self, obj, scale, along="X", keep="min", segments=8, axis=None):
         """Narrow (or widen) the piece along an axis: its cross-section is scaled from 1 at the `keep` end ("min" or
         "max") to `scale` at the other, about the piece's centre line. scale is one number or a pair for the two other
         axes in XYZ order (along X: (y, z)). A stock thinning to its butt, a tapered barrel, a wedge nose."""
         self._check(obj)
-        ai = "XYZ".index(_axis(along))
+        ai = "XYZ".index(_axis(axis or along))           # the builder writes axis= as for every other call
         others = [i for i in range(3) if i != ai]
         try:
             sc = (float(scale[0]), float(scale[1])) if isinstance(scale, (list, tuple)) else (float(scale), float(scale))

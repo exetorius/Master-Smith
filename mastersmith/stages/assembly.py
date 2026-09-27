@@ -261,6 +261,14 @@ def build_code_part(job, spec, part, plan):
         why = ("; ".join(missing) or text.split("```")[0].strip()).replace("\n", " ")[:200]
         res = _run_part(job, part, _code_from(text), out_dir, "refined%d" % round_no)
         if not res.get("ok"):
+            # a correction that crashes is usually one wrong argument: worth one retry told the error (the bullpup's
+            # side rail lost its correction to kit.taper(axis=...), 2026-09-27)
+            text = job.llm.vision(refine + "\n\nYour corrected code failed: %s\nAnswer with the fixed complete function."
+                                  % str(res.get("error"))[:600], [cmp], model=model, max_tokens=12000 if big else 8000,
+                                  effort=effort, json_only=False)
+            if "```" in text:
+                res = _run_part(job, part, _code_from(text), out_dir, "refined%d_retry" % round_no)
+        if not res.get("ok"):
             job.log("  part %s: correction %d failed (%s); keeping the previous build" % (name, round_no + 1, str(res.get("error"))[:120]))
             return best
         best = {**res, "code": _code_from(text), "refined": round_no + 1}
