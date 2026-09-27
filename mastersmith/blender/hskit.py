@@ -515,6 +515,11 @@ class Kit:
         Model the cage with bevel=0 and few faces - every level multiplies the faces by four."""
         self._check(obj)
         levels = int(max(1, min(int(levels), 3)))
+        faces = max(1, len(obj.data.polygons))
+        while levels > 1 and faces * 4 ** levels > 200000:   # a dense piece smoothed 3 times ran Blender out of memory
+            levels -= 1
+        if faces * 4 ** levels > 200000:
+            raise KitError("smooth is for a light cage: this piece has %d faces; model it with bevel=0 and fewer sides" % faces)
         if crease_angle is not None:
             limit = math.radians(float(crease_angle))
             bm = bmesh.new()
