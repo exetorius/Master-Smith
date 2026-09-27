@@ -11,13 +11,11 @@ glass_prompt: window glass
 ---
 # Environment pieces (buildings, walls, bunkers, ruins, rocks, kit pieces)
 
-For traversable organic interiors, keep authored scale, pivots and passage collision
-when the task is surface repair. Read `docs/ORGANIC_SURFACES.md` for texture density,
-normal splits and the Unreal LOD-section material mapping pitfall. The existing
-generic prop finish recentres/scales and generates convex collision; use a scoped
-existing-mesh workflow when those operations would break level placement or passages.
-`texture_fixes: ["smooth_organic_normals"]` is an opt-in shading repair for a
-continuous organic mesh, not a default for buildings or mixed assemblies.
+For traversable organic interiors, keep authored scale, pivots and passage collision.
+Read `docs/ORGANIC_SURFACES.md` for texture density, normal splits and the Unreal
+LOD-section material mapping pitfall. The generic prop finish recentres/scales and
+generates convex collision; handle the mesh in the engine when those operations would
+break level placement or passages.
 
 One structure, plain white background, three-quarter view so the roof and two facades show. Name the
 construction materials (sandbags, concrete, corrugated steel, stone, timber) and the footprint in

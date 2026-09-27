@@ -25,8 +25,9 @@ approved pictures ──► PLAN (builder LLM, vision)          one box per part
   real bevels and clean normals, at a few hundred triangles each.
 - What code cannot model well (a moulded grip, a sculpted stock) goes to the vendor ALONE. A part on its own is a
   simple shape the vendor gets right; the whole gun at once is where it melts.
-- Every part is checked before it joins the rest. Nothing is repaired afterwards: no cylinder repair, no tone
-  pull, no de-light, no recolour under masks, no part removal. A wrong part is rebuilt, not patched.
+- Every part is checked before it joins the rest. Nothing is repaired afterwards, on this path or any other: the
+  post-op repairs (cylinder repair, tone pull, de-light, recolour under masks, part removal, added parts) were
+  removed on 2026-09-26. A wrong part is rebuilt, not patched.
 
 ## The frame
 

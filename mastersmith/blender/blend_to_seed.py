@@ -15,9 +15,9 @@ if lod0 is None:
 bpy.ops.object.select_all(action="DESELECT")
 lod0.select_set(True)
 bpy.context.view_layer.objects.active = lod0
-# Only the body seeds the re-finish. The glass slot, the built panes/canopy shell, the fitted cockpit, barrel tubes
-# and part seeds are all the finish pass's own additions and are rebuilt by the finish; left in, the finish fitted a SECOND
-# cockpit under a canopy it re-detected and their materials fought over the body's texture files (Havoc, 2026-09-18).
+# Only the body seeds the re-finish. The glass slot and the built panes are the finish pass's own additions (older
+# deliveries also carry fitted interiors and parts) and are rebuilt by the finish; left in, their materials fought over
+# the body's texture files (Havoc, 2026-09-18).
 me = lod0.data
 own = [i for i, sl in enumerate(lod0.material_slots) if i > 0 and sl.material and sl.material.name.startswith("MI_")]
 if own:

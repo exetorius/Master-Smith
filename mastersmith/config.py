@@ -71,11 +71,6 @@ CONCEPT_MODEL_PREMIUM = os.environ.get("MASTERSMITH_CONCEPT_PREMIUM", "fal-ai/na
 # the cheap model hallucinates extra fine parts on weapons and vehicles (issue #8). Set MASTERSMITH_CONCEPT_HARD to override.
 CONCEPT_MODEL_HARD = os.environ.get("MASTERSMITH_CONCEPT_HARD", "fal-ai/nano-banana-pro")
 IMAGE_RESOLUTION = os.environ.get("MASTERSMITH_IMAGE_RESOLUTION", "1K")
-# The hybrid repaint of the seed: "meshy" = Meshy retexture on fal ($0.30); "pictures" = the picture model repaints the
-# seed's own orthographic renders in the reference's look and Blender projects and bakes them (about $0.40 of pictures,
-# ported from the openrouter-only branch). MASTERSMITH_REPAINT overrides; Spec.repaint per build.
-REPAINT_DEFAULT = os.environ.get("MASTERSMITH_REPAINT", "meshy").strip().lower() or "meshy"
-STAMP_MARKINGS = os.environ.get("MASTERSMITH_STAMP_MARKINGS", "0") == "1"   # exact lettering stamped from a markings read of the reference
 HARD_SURFACE_CATEGORIES = ("weapon", "vehicle", "aircraft", "helicopter")
 # Alternative seed vendors for the hard-surface comparison of issue #6; MASTERSMITH_SEED_MODEL overrides the default.
 SEED_MODEL_ALTERNATIVES = {"hitem3d": "fal-ai/hitem3d/image-to-3d", "meshy7": "fal-ai/meshy/v7/image-to-3d",
@@ -86,18 +81,6 @@ SEED_MULTIVIEW_ALTERNATIVES = {"meshy7mv": "fal-ai/meshy/v7/multi-image-to-3d"}
 # Hi3D v3 multi-view (2026-09-25): the same 2048-voxel model fed named front / back / left / right pictures instead of one.
 # Same price as its single-image sibling; every slot is optional, so our [primary, second view, mirror] set fits it.
 SEED_HI3D_MULTIVIEW = "hitem3d/hi3d/v3.0/multi-view-to-3d"
-# Hybrid seed (2026-09-18): Meshy v7 geometry (sharper, ~$0.035) then Meshy retexture on the mesh's own UVs (~$0.30) for
-# a clean albedo instead of Meshy's speckled one. Categories listed here default to it; MASTERSMITH_HYBRID=0|1 overrides.
-_hyb_env = os.environ.get("MASTERSMITH_HYBRID", "").strip()
-HYBRID_DEFAULT = None if _hyb_env not in ("0", "1") else _hyb_env == "1"
-# Off by default (opt in with Spec.hybrid or MASTERSMITH_HYBRID=1). Local pairs favoured it on ground vehicles and the sword
-# (clean albedo, sharper edges), but production wave 22 (2026-09-18) showed the reference repaint washing colours toward
-# light silver (M4A1, Glock, a grey F-150 for a dark blue truck), painting windows white, and Meshy melting rotor hubs
-# and thin airframes. Until the repaint holds the reference colours, Tripo stays the default everywhere.
-HYBRID_CATEGORIES = ()
-# Which geometry a hybrid build seeds with: "meshy7mv" (the original hybrid) or "tripo" (Tripo's mesh, repainted). Tripo
-# geometry with the picture repaint is the production setting since 2026-09-19 (Meshy melted rotor hubs and airframes).
-HYBRID_SEED = os.environ.get("MASTERSMITH_HYBRID_SEED", "meshy7mv").strip().lower() or "meshy7mv"
 # Tripo quad topology (+$0.05, answers FBX): on the Glock photo it kept the slide text legible and scored the best edge
 # energy of four vendors (issue #6, 2026-09-17). Default for hard-surface categories; MASTERSMITH_SEED_QUAD=0/1 forces it.
 _quad_env = os.environ.get("MASTERSMITH_SEED_QUAD", "")
@@ -105,7 +88,6 @@ SEED_QUAD = _quad_env == "1" if _quad_env in ("0", "1") else None   # None -> by
 EDIT_MODEL = os.environ.get("MASTERSMITH_EDIT_MODEL", "fal-ai/nano-banana-2")   # photo -> clean profile / other view (its /edit endpoint)
 CUTOUT_MODEL = "fal-ai/birefnet/v2"             # background removal, $0.003
 SEED_MODEL = "tripo3d/h3.1/image-to-3d"         # full PBR, thin parts survive
-RETEXTURE_MODEL = "fal-ai/meshy/v5/retexture"   # repaint an existing mesh on its own UVs, $0.30
 SEED_MULTIVIEW_MODEL = "tripo3d/h3.1/multiview-to-3d"
 SEED_ALT_MODEL = "fal-ai/hyper3d/rodin/v2"      # several references at once; refuses military subjects
 

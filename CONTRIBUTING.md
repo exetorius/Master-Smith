@@ -5,9 +5,10 @@ that matter most. Thank you for them.
 
 ## What helps most
 
-- **Quality of the models.** Better reference pictures, better seed vendor settings, smarter Blender finishing
-  (glass, cockpits, wheels, part seeds, decimation, baking). Measure before and after on the same brief and put
-  the renders in the PR.
+- **Quality of the models.** Better reference pictures, better seed vendor settings, better assembly parts, smarter
+  Blender finishing (glass, wheels, decimation, baking). Measure before and after on the same brief and put the
+  renders in the PR. Passes that repair a finished mesh after the fact (recolouring under masks, deleting or fitting
+  parts, repainting) are not taken: build it right from the pictures instead.
 - **New categories.** A skill is a Markdown file in `mastersmith/skills/` with front matter the pipeline reads.
   See the README section "Adding a skill or a vendor".
 - **New vendors.** One row in `mastersmith/pricing.py` and a call site in a stage. Unpriced endpoints are refused

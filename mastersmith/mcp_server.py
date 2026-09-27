@@ -50,7 +50,7 @@ def _tool(name, args):
 
 @server.tool()
 def director_prompt() -> str:
-    """Read this FIRST and follow it: the director's system prompt (how a job goes, the remedies, what to ask), the
+    """Read this FIRST and follow it: the director's system prompt (how a job goes, what a change costs, what to ask), the
     current brief and the last job of this session."""
     return json.dumps(_get("/v1/sessions/%s/prompt" % SESSION), default=str)
 
@@ -59,14 +59,10 @@ def director_prompt() -> str:
 def set_brief(name: str, description: str, category: str, style: str = "realistic", engine: str = "unreal",
               tri_budget: int = 0, size_m: float = 0.0, reference_images: list[str] | None = None, search_query: str = "",
               research: bool | None = None, single_picture: bool | None = None, premium: bool = False, glass: bool | None = None,
-              rig: bool | None = None, notes: str = "", edit_instructions: str = "", retexture: bool = False,
-              retexture_parts: list[dict] | None = None, protect_parts: list[dict] | None = None,
-              texture_fixes: list[str] | None = None, remove_parts: list[str] | None = None,
-              add_parts: list[dict] | None = None, build_mode: str = "", seed_vendor: str = "", picture_model: str = "") -> str:
+              rig: bool | None = None, notes: str = "", edit_instructions: str = "", build_mode: str = "",
+              seed_vendor: str = "", picture_model: str = "") -> str:
     """Set or update the build brief. Returns the brief as understood and the worst-case estimate."""
     args = {k: v for k, v in locals().items() if v not in (None, "", 0, 0.0, False, [])}
-    if add_parts is not None:
-        args["add_parts"] = add_parts  # [] deliberately removes earlier additions on the next re-finish
     return _tool("set_brief", args)
 
 
@@ -77,10 +73,10 @@ def make_reference() -> str:
 
 
 @server.tool()
-def build(confirm_removal: bool = False) -> str:
+def build(skip_preview: bool = False) -> str:
     """Build the current brief: seeds from the approved reference when there is one; queues the job and returns its id.
-    With new remove_parts it answers a red-on-render preview first; call again with confirm_removal=true to proceed."""
-    return _tool("build", {"confirm_removal": confirm_removal})
+    skip_preview=true only when the customer explicitly asked to build without approving pictures."""
+    return _tool("build", {"skip_preview": True} if skip_preview else {})
 
 
 @server.tool()
@@ -95,12 +91,6 @@ def import_model(path: str, name: str, category: str, description: str = "", eng
 def job_status(job_id: str = "") -> str:
     """Status, log tail and results of a queued or finished job (the last one when job_id is empty)."""
     return _tool("job_status", {"job_id": job_id} if job_id else {})
-
-
-@server.tool()
-def plan_repair(job_id: str = "") -> str:
-    """Read a completed job and propose targeted repair edits. No building or generation fees."""
-    return _tool("plan_repair", {"job_id": job_id} if job_id else {})
 
 
 @server.tool()

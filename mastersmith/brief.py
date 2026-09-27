@@ -1,4 +1,4 @@
-"""Words in the brief that decide the category. The category picks which passes run (glass, canopy, cockpit,
+"""Words in the brief that decide the category. The category picks which passes run (glass, canopy,
 sockets, rig), so the customer's words win over the chat model's filing: a helicopter is a helicopter whatever
 it was called (an Apache filed as a PROP got a 1 m, 30k-tri build with no canopy)."""
 

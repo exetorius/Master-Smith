@@ -1,26 +1,10 @@
 # Generated textures on large organic surfaces
 
 Distinguish UV-atlas boundaries, generated-image border wrapping, split shading
-normals, invalid material sections, and geometry gaps before selecting a repair.
+normals, invalid material sections, and geometry gaps before deciding what to change.
 A material being assigned to a component does not establish that every rendered
-LOD section uses it, nor that its appearance is accepted.
-
-## Shared-vertex normal repair
-
-For an explicitly selected continuous organic mesh, add
-`"smooth_organic_normals"` to `Spec.texture_fixes`. The finish smooths the source
-and LOD0 before tangent-normal baking, then the lower LODs before export. It
-records `normal_repairs` in the delivery report. The reusable Blender helper is
-`mastersmith/blender/surface_normals.py`; it also supports an existing-mesh route
-that preserves level transforms and collision outside the generic prop finish.
-
-The diagnostic counts differing corner normals at shared vertices. Intentional
-creases also produce differences: do not infer damage from that count alone.
-The repair removes hard edges on the selected mesh, without changing positions,
-UVs, topology or face winding. Do not opt in for mechanical parts, mixed assemblies,
-or surfaces with intentional creases. Separate those surfaces first. It does not
-fix gaps, coincident disconnected vertices, overlapping shells or inverted faces.
-Existing baked tangent-normal maps may require rebaking against the changed basis.
+LOD section uses it, nor that its appearance is accepted. The pipeline does not
+repair a delivered mesh: a surface that is wrong is built again.
 
 ## Texture density and projection
 

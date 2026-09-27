@@ -51,7 +51,7 @@ def cmd_run(a):
     from .pipeline import build
     spec = Spec(name=a.name, description=a.description, category=a.category, style=a.style, engine=a.engine,
                 tri_budget=a.tris, size_m=a.size, reference_image=a.reference or "", multiview=not a.single_view,
-                premium=a.premium, hybrid=True if a.hybrid else None, repaint=a.repaint)
+                premium=a.premium)
     est = pricing.estimate(spec)
     w = Wallet()
     print("brief: %s" % json.dumps(spec.to_dict()))
@@ -131,8 +131,6 @@ def main(argv=None):
     r.add_argument("--reference", default="")
     r.add_argument("--single-view", action="store_true")
     r.add_argument("--premium", action="store_true")
-    r.add_argument("--hybrid", action="store_true", help="repaint the seed on its own UVs after seeding")
-    r.add_argument("--repaint", choices=["meshy", "pictures"], default=None, help="how the hybrid repaint is done (default %s)" % config.REPAINT_DEFAULT)
     r.add_argument("--yes", action="store_true")
     r.set_defaults(fn=cmd_run)
     im = sub.add_parser("import", help="finish a model file you already have (GLB, glTF, FBX, OBJ or a delivered .blend)")

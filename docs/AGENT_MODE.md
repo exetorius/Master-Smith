@@ -1,8 +1,8 @@
 # Another brain: Claude Code, Codex or any MCP client as the director
 
 The web chat's director is an OpenRouter model. For testing, or just to use a subscription you already pay for, the
-director's *thinking* can run in Claude Code, Codex or any MCP client instead, with the same system prompt, skills,
-tools and remedies. Pictures, meshes, masks, the Blender finish and the vision checks still run in the API on your
+director's *thinking* can run in Claude Code, Codex or any MCP client instead, with the same system prompt, skills
+and tools. Pictures, meshes, masks, the Blender finish and the vision checks still run in the API on your
 fal.ai and OpenRouter keys; only the director's own tokens move. OpenRouter stays available in the web at any time.
 
 Every chat driven this way is recorded on the API (`record_turn`), so it appears in the web's sidebar with its jobs,
@@ -50,49 +50,31 @@ codex mcp add master-smith -- python -m mastersmith mcp
 with `MASTERSMITH_API_URL` (and `MASTERSMITH_API_KEY`, `MASTERSMITH_SESSION`) in the environment Codex starts from.
 Then tell Codex: "Call director_prompt and act as the Master Smith director. I want a wooden barrel, 1 m, Unreal."
 
-## Repair acceptance
+## Acceptance
 
 The director distinguishes a completed job from an accepted asset. `job_status.summary.quality` is the live
-quality assessment, including for older jobs whose stored gate incorrectly passed a `rebuild` verdict.
-A requested cabin or added assembly needs per-part visual evidence in `review.assembly_checks`, not just a
-successful join or a triangle count. Future finishes render `preview_assembly_iso.png` and
-`preview_assembly_top.png` from the delivered LOD0, keeping the hull and glass in place. Obscured detail is
-reported as unverified. Missing parts, missing close-ups and a rebuild verdict prevent visual acceptance;
-files remain available for inspection. `gate.technical_ok` reports packaging checks separately.
+quality assessment, including for older jobs whose stored gate incorrectly passed a `rebuild` verdict. A rebuild
+verdict prevents visual acceptance; files remain available for inspection. `gate.technical_ok` reports packaging
+checks separately.
 
-Before another failed assembly rework, change a specific fit/geometry setting rather than repeating the same
-brief. Reuse bought parts; avoid generating a separate control already included in a cockpit module. In addition
-to `offset_m` and `size_m`, `add_parts[].yaw_degrees` can override the prepared part's facing with -180, -90, 0,
-90 or 180 degrees, without another facing-model call. Omit it for automatic facing. A missing interior anchor
-is reported, never silently replaced with the whole body's bounds. These safeguards do not repair existing
-models retroactively or start paid jobs automatically.
-
-### Targeted repair planning
-
-`plan_repair` reads a completed job and proposes concrete brief edits without spending. For Havoc-style failures,
-it prioritizes preserving a clean seed's maps, omitting redundant additions, and inspecting obscured controls;
-it does not automatically launch a build. `add_parts[].provides` inventories the components in a module
-(seat, panel, consoles, stick, pedals, floor, walls, bulkhead). The director checks for a loose control already
-included in a compound cockpit before spending. Part-generation prompts honor the requested exclusions.
+Nothing repairs a finished mesh. Size, triangle budget, engine, rig and glass changes re-finish the same mesh; any
+change you would see is a new build from edited pictures. The review receives the source seed preview, so a
+finish that damaged a clean seed is reported as a finishing regression (a pipeline bug to fix, not a brief change).
 
 The finish preserves source normal/AO maps when multiple material UV domains make the shared-atlas baker unsafe.
-For an existing bad result, `texture_fixes: ["preserve_seed_maps"]` re-finishes its original seed without derived
-normal/AO baking or reference projection. Reviews receive the source seed preview and a separately labeled
-canopy-hidden diagnostic view: the cutaway proves internal geometry, not the delivered glass's appearance.
 
-For local debugging, `scripts/replay_finish.py SOURCE_JOB EMPTY_OUTPUT` replays only Blender with saved masks
-and purchased parts, making no provider calls. Use read-only source data and a separate diagnostic output. Optional
-`--omit-additions CabinShell Joystick` and `--preserve-seed-maps` allow isolated repair comparisons without
-replacing the original delivery or paying for another generation.
+For local debugging, `scripts/replay_finish.py SOURCE_JOB EMPTY_OUTPUT` replays only Blender with the saved seed
+and masks, making no provider calls. Use read-only source data and a separate diagnostic output; the original
+delivery is never replaced.
 
 ## What still costs money
 
 | Where | What | Paid by |
 | --- | --- | --- |
 | The client (Claude Code, Codex) | the director's reasoning and tool calls | your subscription |
-| The API | reference pictures, extra angles, cockpit/part pictures | OpenRouter image models |
+| The API | reference pictures, extra angles, assembly part pictures | fal.ai or OpenRouter image models |
 | The API | picture checks, facing, review | OpenRouter vision model |
-| The API | meshes, masks, rigs, repaint | fal.ai |
+| The API | meshes, masks, rigs | fal.ai |
 
 Building from Claude Code is exactly as expensive on fal and OpenRouter *images* as building from the web; what you
 save is the director's chat, which is cents a turn with Gemini Flash and dollars an hour with Opus.

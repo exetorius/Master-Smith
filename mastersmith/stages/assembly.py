@@ -12,7 +12,7 @@ from .. import config, pricing
 from ..fal import first_url
 from ..llm import extract_json
 from .finish import BLENDER_DIR, _blender
-from .parts import ADD_CHECK, orient_added_part
+from .partorient import PART_CHECK, orient_part
 from .plan import crop_to_object, draw_grid, make_plan, pick_views, to_metres
 
 sys.path.insert(0, str(BLENDER_DIR))
@@ -165,7 +165,7 @@ def build_vendor_part(job, spec, part, plan):
                             "colours and materials), seen from a three-quarter view, isolated on a plain pure white "
                             "background, nothing else in frame, sharp product photograph. %s" % (part["what"], fixes),
                             path, model=pricing.edit_model(spec), references=[ref], aspect_ratio="1:1")
-        j = extract_json(job.llm.vision(ADD_CHECK.format(part=part["what"]), [path])) or {}
+        j = extract_json(job.llm.vision(PART_CHECK.format(part=part["what"]), [path])) or {}
         if j.get("ok") and int(j.get("score", 0) or 0) >= 6:
             picture = path
             break
@@ -187,7 +187,7 @@ def build_vendor_part(job, spec, part, plan):
     ext = ".fbx" if mesh_url.split("?")[0].lower().endswith(".fbx") else ".glb"
     glb = os.path.join(out_dir, "seed" + ext)
     job.fal.download(mesh_url, glb)
-    oriented = orient_added_part(job, spec, {"name": name, "phrase": part["what"], "size_m": max(_size(part))}, glb)
+    oriented = orient_part(job, spec, {"name": name, "phrase": part["what"], "size_m": max(_size(part))}, glb)
     if not oriented:
         return None
     job.log("  part %s: seeded by %s, facing yaw %s" % (name, model.split("/")[0], oriented.get("yaw")))

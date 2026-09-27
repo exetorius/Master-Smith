@@ -79,65 +79,60 @@ def test_prepare_and_finish_on_a_synthetic_box():
             assert os.path.exists(os.path.join(out, f)), f
 
 
-def test_add_parts_fits_a_seed_onto_the_body():
-    """A second copy of the box is fitted on top of the body at 0.3 m; the body keeps its size and gains faces."""
+MAKE_MASK = r'''
+import bpy, sys, numpy as np
+out, w, h = sys.argv[sys.argv.index("--") + 1], 256, 256
+im = bpy.data.images.new("mask", w, h, alpha=False)
+px = np.zeros((h, w, 4), np.float32)
+px[:, :, 3] = 1.0
+px[96:160, 96:160, :3] = 1.0                   # the middle of the side view: "the glass"
+im.pixels.foreach_set(px.ravel())
+im.filepath_raw = out
+im.file_format = "PNG"
+im.save()
+print("MASK", out)
+'''
+
+
+def test_realistic_finish_with_a_glass_mask_and_a_stale_brief():
+    """The packaging path of a single-seed build: the realistic material pass (roughness rebuilt from the seed's own
+    base colour detail), a glass slot from a mask, the detail bake, LODs, collision, exports. Finish args written
+    before 2026-09-26 still carry the removed repair keys; they are ignored."""
     with tempfile.TemporaryDirectory() as d:
         make = os.path.join(d, "make.py")
         open(make, "w").write(MAKE_GLB)
         glb = os.path.join(d, "seed.glb")
         blender(make, glb)
         work, out = os.path.join(d, "work"), os.path.join(d, "delivery")
-        common = {"name": "TestBox", "work_dir": work, "out_dir": out, "tri_budget": 4000, "size_m": 1.0,
+        spec = {"name": "TestRifle", "description": "a plain rifle with a scope", "category": "weapon", "style": "realistic"}
+        common = {"name": "TestRifle", "work_dir": work, "out_dir": out, "tri_budget": 1200, "size_m": 1.0, "spec": spec,
                   "engine": "unreal", "forward_axis": "long", "origin": "center", "glb": glb, "probe_size": 256, "render_size": 256}
         a1 = os.path.join(d, "prepare.json")
         json.dump(common, open(a1, "w"))
         blender(str(config.ROOT / "mastersmith" / "blender" / "prepare.py"), a1)
-        json.dump({"yaw": 0, "facing": {"reason": "test"}, "regions": {}}, open(os.path.join(work, "decision.json"), "w"))
+        mk = os.path.join(d, "mask.py")
+        open(mk, "w").write(MAKE_MASK)
+        blender(mk, os.path.join(work, "mask_posy_glass_0.png"))
+        json.dump({"yaw": 0, "facing": {"reason": "test"},
+                   "regions": {"glass": {"posy": [{"file": "mask_posy_glass_0.png", "score": 0.9}]}}},
+                  open(os.path.join(work, "decision.json"), "w"))
+        stale = {"texture_fixes": ["delight", "kill_highlights", "preserve_seed_maps"], "remove_parts": ["the stock"],
+                 "reproject": True, "material_families": [{"phrase": "the barrel"}], "add_parts": [{"name": "Rack", "glb": glb}],
+                 "part_seeds": [{"name": "Magazine", "glb": glb}], "cockpit_glb": glb, "cockpit_parametric": True}
         a2 = os.path.join(d, "finish.json")
-        json.dump({**common, "add_parts": [{"index": 0, "name": "Rack", "phrase": "a roof rack", "anchor": "body",
-                                            "place": "on_top", "size_m": 0.3, "glb": glb}]}, open(a2, "w"))
+        json.dump({**common, "bake_detail": True, **stale}, open(a2, "w"))
         blender(str(config.ROOT / "mastersmith" / "blender" / "finish.py"), a2)
         rep = json.load(open(os.path.join(out, "report.json")))
-        added = rep.get("added_parts") or []
-        assert added and added[0]["name"] == "Rack" and added[0]["place"] == "on_top" and added[0]["faces_added"] > 0
-        assert rep["review_renders"] == ["preview_assembly_iso.png", "preview_assembly_top.png"]
-        assert all(os.path.exists(os.path.join(out, p)) for p in rep["review_renders"])
-        assert rep["bake"]["status"] == "skipped" and "UV domains" in rep["bake"]["reason"]
-        assert rep["inspection_renders"] == ["preview_inspection_canopy_hidden.png"]
-        assert os.path.exists(os.path.join(out, rep["inspection_renders"][0]))
-        assert abs(max(added[0]["size_m"]) - 0.3) < 0.02                  # the spec's size wins
-        assert rep["dimensions_m"][0] > 0.99                                # the body was not shrunk
-        assert rep["dimensions_m"][2] > 0.08 + 0.03                         # taller: the rack sits on top
-
-
-def test_add_parts_from_a_prepared_part_with_a_yaw():
-    """The part goes through its own prepare pass (as the stage does), is appended from that .blend and turned by the
-    facing yaw; it still lands on top at the asked size."""
-    with tempfile.TemporaryDirectory() as d:
-        make = os.path.join(d, "make.py")
-        open(make, "w").write(MAKE_GLB)
-        glb = os.path.join(d, "seed.glb")
-        blender(make, glb)
-        work, out = os.path.join(d, "work"), os.path.join(d, "delivery")
-        common = {"name": "TestBox", "work_dir": work, "out_dir": out, "tri_budget": 4000, "size_m": 1.0,
-                  "engine": "unreal", "forward_axis": "long", "origin": "center", "glb": glb, "probe_size": 256, "render_size": 256}
-        a1 = os.path.join(d, "prepare.json")
-        json.dump(common, open(a1, "w"))
-        blender(str(config.ROOT / "mastersmith" / "blender" / "prepare.py"), a1)
-        part_dir = os.path.join(work, "part_Rack")
-        a_part = os.path.join(d, "part_prepare.json")
-        json.dump({"name": "Rack", "work_dir": part_dir, "glb": glb, "size_m": 0.3, "forward_axis": "long", "origin": "center",
-                   "probe_size": 128}, open(a_part, "w"))
-        blender(str(config.ROOT / "mastersmith" / "blender" / "prepare.py"), a_part)
-        assert os.path.exists(os.path.join(part_dir, "work.blend")) and os.path.exists(os.path.join(part_dir, "probe_negx.png"))
-        json.dump({"yaw": 0, "facing": {"reason": "test"}, "regions": {}}, open(os.path.join(work, "decision.json"), "w"))
-        a2 = os.path.join(d, "finish.json")
-        json.dump({**common, "add_parts": [{"index": 0, "name": "Rack", "phrase": "a roof rack", "anchor": "body", "place": "on_top",
-                                            "size_m": 0.3, "glb": glb, "blend": os.path.join(part_dir, "work.blend"), "yaw": 180}]},
-                  open(a2, "w"))
-        blender(str(config.ROOT / "mastersmith" / "blender" / "finish.py"), a2)
-        rep = json.load(open(os.path.join(out, "report.json")))
-        added = rep.get("added_parts") or []
-        assert added and added[0]["yaw"] == 180 and added[0]["faces_added"] > 0
-        assert abs(max(added[0]["size_m"]) - 0.3) < 0.02
-        assert rep["dimensions_m"][2] > 0.08 + 0.03
+        assert rep["lods"][0]["triangles"] <= 1200 * 1.03 and len(rep["lods"]) == 3
+        assert rep["glass"]["faces"] > 0 and rep["glass"]["material"] == "MI_TestRifle_Glass"
+        assert "MI_TestRifle_Glass" in rep["materials"] and "MI_TestRifle" in rep["materials"]
+        stats = next(iter(rep["material_pass"].values()))                  # keyed by the vendor material's name
+        assert "roughness_rebuilt_mean" in stats and 0.3 <= rep["roughness_mean"] <= 0.92
+        assert not any(k.startswith(("basecolor_", "delight", "highlights")) for k in stats)     # the base colour is the seed's
+        assert {m["role"] for m in rep["maps"]} == {"BC", "N", "ORM"}
+        assert "bake" in rep
+        for gone in ("added_parts", "part_seeds", "removed_parts", "cockpit", "reproject", "material_families",
+                     "review_renders", "inspection_renders"):
+            assert gone not in rep, gone
+        for f in ("SM_TestRifle.fbx", "SM_TestRifle_LOD1.fbx", "SM_TestRifle.glb", "SM_TestRifle.blend", "preview_iso.png"):
+            assert os.path.exists(os.path.join(out, f)), f

@@ -12,16 +12,13 @@ from .fal import Fal, FalError
 from .images import Images
 from .llm import LLM
 from .netsafe import download_public
-from .diagnose import diagnose
 from .stages.finish import run_finish
 from .stages.gate import check as gate_check
 from .stages.package import write_package
 from .stages.reference import make_reference
-from .stages.repaint import make_repaint
 from .stages.review import review
 from .stages.rig import rig_asset
-from .stages.retexture import make_retexture
-from .stages.seed import hybrid_wanted, make_seed
+from .stages.seed import make_seed
 from .stages.assembly import build_assembly
 from .spec import assembly_wanted
 
@@ -107,16 +104,6 @@ class Job:
 
     def bill_calls(self):
         return {"by_stage": self.by_stage(), "fal_calls": self.fal.calls, "image_calls": self.images.calls, "llm_calls": self.llm.calls}
-
-
-def repaint_seed(job, seed_glb, reference):
-    """The hybrid repaint: Meshy retexture maps on the seed's UVs, or the picture repaint (a new textured GLB).
-    -> (seed_glb to finish, retexture_maps or None, note)"""
-    if pricing.repaint_mode(job.spec) == "pictures":
-        out = make_repaint(job, seed_glb, reference)
-        return out["glb"], None, "pictures"
-    maps = make_retexture(job, seed_glb, style_image=reference)["maps"]
-    return seed_glb, maps, "meshy"
 
 
 def make_reference_only(spec, user, wallet, log=print, job_id=None):
@@ -208,7 +195,6 @@ def build(spec, user, wallet, log=print, job_id=None):
             result["gate"] = gate_check(spec, report, result["review"], delivery_dir)
             if result["gate"]["warnings"]:
                 log("gate: " + "; ".join(result["gate"]["warnings"]))
-            result["diagnosis"] = []
             result["package"] = write_package(spec, report, result, delivery_dir)
             result["status"] = "done"
             return result          # the finally below settles the bill and writes job.json
@@ -216,18 +202,9 @@ def build(spec, user, wallet, log=print, job_id=None):
         log("2/4 3D seed")
         seed = make_seed(job, ref.get("seed_urls") or ref["urls"])
         result["seed"] = {"model": seed["model"], "glb": seed["glb"]}
-        retex_maps = None
-        seed_glb = seed["glb"]
-        if hybrid_wanted(spec):
-            job.stage("repaint")
-            log("2b/4 hybrid repaint of the seed (%s)" % pricing.repaint_mode(spec))
-            seed_glb, retex_maps, note = repaint_seed(job, seed["glb"], ref["views"][0])
-            result["seed"]["repaint"] = note
-            result["seed"]["repainted_glb"] = seed_glb if note == "pictures" else None
         job.stage("finish")
         log("3/4 Blender finish")
-        report = run_finish(job, skill, seed_glb, reference=ref["views"][0], retexture_maps=retex_maps,
-                            reference_source=ref.get("source"))
+        report = run_finish(job, skill, seed["glb"], reference=ref["views"][0])
         result["delivery"] = report
         result["delivery_dir"] = os.path.join(job.dir, "delivery")
         if spec.rig:
@@ -241,9 +218,6 @@ def build(spec, user, wallet, log=print, job_id=None):
         result["gate"] = gate_check(spec, report, result["review"], result["delivery_dir"])
         if result["gate"]["warnings"]:
             log("gate: " + "; ".join(result["gate"]["warnings"]))
-        result["diagnosis"] = diagnose(result, job.work_dir, spec, ref.get("source"))
-        for f in result["diagnosis"]:
-            log("diagnosis: %s -> %s" % (f["finding"], f["remedy"]))
         result["package"] = write_package(spec, report, result, result["delivery_dir"])
         result["status"] = "done"
     except Exception as exc:  # noqa: BLE001 - whatever failed, the hold must settle and the report be written
@@ -281,11 +255,9 @@ def blend_to_seed(blend_path, work_dir, log=print):
 def rework(seed_path, spec, user, wallet, ref_view=None, mode="refinish", log=print, job_id=None):
     """Finish an EXISTING mesh under a brief without buying a new seed: a model the customer imported (GLB, glTF,
     FBX, OBJ or a delivered .blend) or the seed of an earlier job.
-      mode "refinish":  orient, scale, glass, LODs, maps, collision, rig, review and package again;
-      mode "retexture": the mesh is repainted first - recoloured under part masks when every named part has a flat
-                        colour, else by the retexture vendor guided by a picture edited from `ref_view` (or by the
-                        text alone when there is no picture) - then finished.
-    Pays for the probe, repaint, rig and review calls only."""
+      mode "refinish": orient, scale, glass, LODs, maps, collision, rig, review and package again - for a change of
+                       size, budget, engine, rig or glass. A change of shape, part or colour is a new build.
+    Pays for the probe, rig and review calls only."""
     est = pricing.estimate_rework(spec, mode)
     providers.check_affordable(est["usd"])
     credits = est["credits"]
@@ -305,31 +277,10 @@ def rework(seed_path, spec, user, wallet, ref_view=None, mode="refinish", log=pr
             if not ref_view and stored_ref and os.path.exists(stored_ref):
                 ref_view = stored_ref
             result["seed"]["glb"] = seed_glb
-        retex_maps, recolor = None, None
-        if mode == "retexture":
-            parts = spec.retexture_parts or []
-            if parts and all(isinstance(p, dict) and p.get("color") for p in parts):
-                recolor = parts                       # flat colours: recolour the existing maps under the part masks
-                log("1/4 recolouring %s on the existing mesh" % ", ".join(p["phrase"] for p in parts))
-            else:
-                guide = ref_view
-                if ref_view and os.path.exists(ref_view):
-                    spec.reference_images, spec.reference_image = [ref_view], ref_view
-                    spec.research, spec.search_query = False, ""
-                    job.stage("reference")
-                    log("1/4 guide picture of the new look")
-                    try:
-                        guide = make_reference(job, skill)["views"][0]
-                    except Exception as exc:  # noqa: BLE001 - the text prompt alone still repaints
-                        log("  guide picture failed (%s); repainting from the text alone" % str(exc)[:160])
-                job.stage("repaint")
-                log("2/4 repainting the mesh (retexture vendor, original UVs)")
-                retex_maps = make_retexture(job, seed_glb, style_image=guide)["maps"]
-                ref_view = guide or ref_view
         result["reference"] = {"views": [ref_view] if ref_view else []}
         job.stage("finish")
         log("3/4 Blender finish")
-        report = run_finish(job, skill, seed_glb, reference=ref_view, retexture_maps=retex_maps, recolor=recolor)
+        report = run_finish(job, skill, seed_glb, reference=ref_view)
         result["delivery"] = report
         result["delivery_dir"] = os.path.join(job.dir, "delivery")
         if spec.rig:
@@ -341,9 +292,6 @@ def rework(seed_path, spec, user, wallet, ref_view=None, mode="refinish", log=pr
         result["gate"] = gate_check(spec, report, result.get("review"), result["delivery_dir"])
         if result["gate"]["warnings"]:
             log("gate: " + "; ".join(result["gate"]["warnings"]))
-        result["diagnosis"] = diagnose(result, job.work_dir, spec)
-        for f in result["diagnosis"]:
-            log("diagnosis: %s -> %s" % (f["finding"], f["remedy"]))
         result["package"] = write_package(spec, report, result, result["delivery_dir"])
         result["status"] = "done"
     except Exception as exc:  # noqa: BLE001
@@ -373,45 +321,9 @@ def refinish(job_dir, user, wallet, overrides=None, log=print, job_id=None):
 
 
 def seed_of(result):
-    """The mesh a finished job's finish ran on (the repainted GLB when the hybrid picture repaint made one)."""
-    seed = (result or {}).get("seed") or {}
-    for key in ("repainted_glb", "glb"):
-        p = seed.get(key)
-        if p and os.path.exists(p):
-            return p
-    return None
+    """The mesh a finished job's finish ran on."""
+    p = ((result or {}).get("seed") or {}).get("glb")
+    return p if p and os.path.exists(p) else None
 
 
-def preview_removal_job(source_dir, spec, user, wallet, log=print, job_id=None):
-    """What a remove_parts repair would delete, drawn in red on the source job's probe renders, for the customer to
-    confirm before any face goes. A few SAM calls; no Blender, no mesh."""
-    from .stages.removal import preview_removal
-    phrases = list(spec.remove_parts or [])
-    est_usd = 0.005 * 3 * len(phrases) * 2 + 0.01                    # masks (two wordings a view at worst) + a box fallback
-    providers.check_affordable(est_usd)
-    hold = wallet.reserve(user, config.credits_for_usd(est_usd), "removal preview %s" % spec.name)
-    job = Job(spec, user, wallet, log, job_id=job_id)
-    result = {"job_id": job.id, "dir": job.dir, "spec": spec.to_dict(), "status": "failed", "kind": "removal_preview",
-              "source": source_dir}
-    log("job %s: preview of removing %s from %s" % (job.id, ", ".join(phrases), os.path.basename(source_dir)))
-    try:
-        job.stage("probe")
-        pics = preview_removal(job, source_dir, phrases)
-        result["pictures"] = pics
-        result["delivery_dir"] = job.dir
-        result["status"] = "done"
-    except Exception as exc:  # noqa: BLE001
-        result["error"] = "%s: %s" % (type(exc).__name__, str(exc)[:600])
-        log("FAILED: %s" % result["error"])
-    finally:
-        usd = job.spent_usd()
-        bill = wallet.settle(hold, usd, "removal preview %s %s" % (job.id, result["status"]))
-        result["bill"] = {"usd_cost": usd, "credits_charged": bill["charged"], "credits_refunded": bill["refunded"],
-                          "balance": bill["balance"], **job.bill_calls()}
-        with open(os.path.join(job.dir, "job.json"), "w") as f:
-            json.dump(result, f, indent=1, default=str)
-    return result
-
-
-__all__ = ["build", "make_reference_only", "load_reference", "preview_removal_job", "refinish", "rework", "seed_of", "Job",
-           "MESH_EXTENSIONS"]
+__all__ = ["build", "make_reference_only", "load_reference", "refinish", "rework", "seed_of", "Job", "MESH_EXTENSIONS"]

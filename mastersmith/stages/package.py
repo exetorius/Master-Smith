@@ -30,8 +30,6 @@ def write_package(spec, report, result, delivery_dir):
     if report.get("tiles"):
         glass_note += (" A seamless tiling material set (T_{name}_Tile_BaseColor/Normal/Roughness/Metallic, plus Height) ships next to "
                        "the atlas; in the engine, layer it over the base material as surface detail on the large flat faces.")
-    if report.get("cockpit"):
-        glass_note += " A cockpit interior (slot MI_{name}_Cockpit) sits under the canopy; keep the glass translucent to see it."
     rig = result.get("rig") or {}
     if rig.get("status") == "rigged" and spec.category == "character":
         rig_note = ("- Skeletal mesh: import SK_{name}.fbx (humanoid skeleton). Import the A_{name}_* files as animations onto "

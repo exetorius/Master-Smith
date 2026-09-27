@@ -46,11 +46,12 @@ def test_fixed_key_is_required_and_accepted(client):
 
 
 def test_old_havoc_status_does_not_repeat_false_acceptance(client):
+    """A job stored before 2026-09-26: its brief has add_parts and its result a diagnosis. The live view still loads,
+    corrects the stale gate and shows no diagnosis or added parts (those passes are gone); the history is unchanged."""
     from mastersmith import service
-    from mastersmith.spec import Spec
-    spec = Spec(name="Havoc", description="gunship", category="aircraft",
-                add_parts=[{"name": "Cabin", "phrase": "the cockpit interior", "anchor": "glass"}])
-    row = {"id": "old-havoc", "status": "done", "kind": "rework", "spec": spec.to_dict(), "created": 0,
+    spec = {"name": "Havoc", "description": "gunship", "category": "aircraft",
+            "add_parts": [{"name": "Cabin", "phrase": "the cockpit interior", "anchor": "glass"}], "texture_fixes": ["delight"]}
+    row = {"id": "old-havoc", "status": "done", "kind": "rework", "spec": spec, "created": 0,
            "started": 0, "finished": 1, "error": None, "log": "", "result": {
                "review": {"score": 5, "verdict": "rebuild", "issues": ["bad cabin"]},
                "gate": {"ok": True, "warnings": []},
@@ -60,32 +61,19 @@ def test_old_havoc_status_does_not_repeat_false_acceptance(client):
     assert not summary["quality"]["accepted"]
     assert summary["gate"]["ok"] is False and summary["gate"]["technical_ok"] is True
     assert row["result"]["gate"]["ok"] is True
-    assert "not accepted" in summary["diagnosis"][0]["finding"]
-    assert "usable" not in str(summary["diagnosis"])
-    assert summary["added_parts"][0]["name"] == "Cabin"
+    assert "diagnosis" not in summary and "added_parts" not in summary
     assert row["result"]["diagnosis"][0]["finding"].startswith("reviewer 5/10: usable")  # history unchanged
 
 
-def test_repair_plan_tool_returns_edits_without_queueing(client, monkeypatch, tmp_path):
-    from mastersmith import service
-    from mastersmith.spec import Spec
-    from mastersmith.store import Store
-    monkeypatch.setenv("OPENROUTER_API_KEY", "not-a-live-key")
-    monkeypatch.setattr(service, "store", Store(tmp_path / "repair-plan.db"))
-    spec = Spec(name="Havoc", description="gunship", category="aircraft")
-    service.store.enqueue("repair-plan-test", "agent", "build", spec.to_dict())
-    service.store.finish("repair-plan-test", "done", result={
-        "delivery": {"bake": {"normal_detail_std": 0.05}},
-        "review": {"score": 4, "verdict": "rebuild", "issues": ["faceted baking artifacts"]}})
-    count = len(service.store.jobs_for("agent"))
-    response = client.post("/v1/sessions/repair-plan-test/tool", headers={"X-API-Key": KEY},
-                           json={"name": "plan_repair", "args": {"job_id": "repair-plan-test"}})
-    assert response.status_code == 200, response.text
-    plan = response.json()
-    assert plan["actions"][0]["changes"]["texture_fixes"] == ["preserve_seed_maps"]
-    assert plan["automatic_build"] is False and plan["requires_confirmation"]
-    assert len(service.store.jobs_for("agent")) == count
-    service.store.db.close()
+def test_the_repair_tools_are_gone(client):
+    H = {"X-API-Key": KEY}
+    r = client.post("/v1/sessions/no-repairs/tool", headers=H, json={"name": "plan_repair", "args": {}})
+    assert r.status_code == 404
+    tools = [t["name"] for t in client.get("/v1/sessions/no-repairs/prompt", headers=H).json()["tools"]]
+    assert "plan_repair" not in tools
+    brief = next(t for t in client.get("/v1/sessions/no-repairs/prompt", headers=H).json()["tools"] if t["name"] == "set_brief")
+    for gone in ("remove_parts", "add_parts", "texture_fixes", "retexture", "retexture_parts", "protect_parts"):
+        assert gone not in brief["parameters"]["properties"], gone
 
 
 def test_config_hides_secrets(client):
@@ -243,8 +231,7 @@ def test_briefs_may_only_name_files_the_service_stored(client, tmp_path):
     up = client.post("/v1/uploads", headers=H, files={"file": ("ok.png", outside.read_bytes(), "image/png")}).json()["path"]
     sneaky = os.path.join(config.UPLOADS_DIR, "..", "..", os.path.relpath(str(outside), str(config.DATA_DIR.parent)))
     for spec in ({"reference_image": str(outside)}, {"reference_images": [up, str(outside)]}, {"reference_image": sneaky},
-                 {"reference_job": str(tmp_path)}, {"add_parts": [{"phrase": "a scope", "picture": str(outside)}]},
-                 {"add_parts": [{"phrase": "a scope", "seed": str(outside)}]}):
+                 {"reference_job": str(tmp_path)}):
         body = {"spec": {"name": "Crate", "description": "oak crate", **spec}}
         r = client.post("/v1/jobs", headers=H, json=body)
         assert r.status_code == 400 and r.json()["detail"]["bad_paths"], spec

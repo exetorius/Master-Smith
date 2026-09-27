@@ -24,9 +24,6 @@ FAL_PRICES = {
     "tripo3d/h3.1/image-to-3d": 0.30,         # standard; +0.10 HD textures, +0.20 detailed geometry, +0.05 quad
     "tripo3d/h3.1/multiview-to-3d": 0.30,
     "fal-ai/hyper3d/rodin/v2": 0.40,
-    "fal-ai/meshy/v5/retexture": 1.20,           # UNVERIFIED: fal's page shows no price sentence for this endpoint; the Meshy
-                                                 # retexture line fal does publish reads "$0.8 per untextured model / $1.2 per
-                                                 # textured model" (2026-09-23), so the worst case is held at $1.20 until measured
     "fal-ai/meshy/v5/remesh": 0.20,
     "fal-ai/sam-3/image": 0.005,                 # text-prompted segmentation masks (glass, wheels)
     "fal-ai/hunyuan-3d/v3.1/part": 0.45,         # split a fused mesh (FBX, <=30k faces) into parts
@@ -54,7 +51,6 @@ IMAGE_PRICES = {
     "openai/gpt-5-image": 0.12,
     "openai/gpt-5-image-mini": 0.03,
 }
-REPAINT_PICTURES = 5          # front / left / back / right / top renders repainted by the picture model
 
 
 class Unpriced(Exception):
@@ -103,11 +99,6 @@ def concept_model(spec):
     if spec.category in config.HARD_SURFACE_CATEGORIES and config.CONCEPT_MODEL_HARD:
         model = config.CONCEPT_MODEL_HARD
     return model
-
-
-def repaint_mode(spec):
-    m = (getattr(spec, "repaint", None) or config.REPAINT_DEFAULT or "meshy").lower()
-    return m if m in ("meshy", "pictures") else "meshy"
 
 
 def price(model, payload=None):
@@ -225,21 +216,6 @@ def _estimate_steps(spec):
     steps.append(("which end is the front (vision)", LLM_CALL_ALLOWANCE_USD))
     if spec.category == "environment" and spec.style == "realistic":
         steps.append(("tiling PBR material set from the reference (Patina)", price("fal-ai/patina")))
-    if getattr(spec, "retexture", False):
-        steps.append(("repaint of the existing mesh (Meshy retexture, original UVs)", price(config.RETEXTURE_MODEL)))
-    from .stages.seed import hybrid_wanted
-    if hybrid_wanted(spec) and not getattr(spec, "retexture", False):
-        if repaint_mode(spec) == "pictures":
-            steps.append(("hybrid repaint of the seed (its renders repainted by the picture model, baked in Blender)",
-                          REPAINT_PICTURES * image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD))
-        else:
-            steps.append(("hybrid repaint of the seed (Meshy retexture, original UVs)", price(config.RETEXTURE_MODEL)))
-    if spec.category in config.HARD_SURFACE_CATEGORIES and (spec.part_seeds or spec.tri_budget >= 150000):
-        steps.append(("separately seeded parts (up to 2: picture + seed each)", 2 * (image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD
-                      + price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"}))))
-    if getattr(spec, "cockpit", False):
-        steps.append(("cockpit as a second model: picture + seed", 2 * image_price(concept_model(spec)) + LLM_CALL_ALLOWANCE_USD
-                      + price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"})))
     if spec.glass:
         steps.append(("glass masks, 5 views (SAM 3)", 5 * price("fal-ai/sam-3/image")))
     if spec.rig and spec.category == "vehicle":
@@ -250,17 +226,11 @@ def _estimate_steps(spec):
         steps.append(("humanoid auto-rig with walk/run (Meshy)", price("fal-ai/meshy/rigging")))
     steps.append(("Blender finish: decimate, orient, scale, LODs, collision, maps, FBX/GLB", 0.0))
     steps.append(("review the result against the picture (vision)", LLM_CALL_ALLOWANCE_USD))
-    for part in (getattr(spec, "add_parts", None) or []):
-        if part.get("seed"):
-            steps.append(("added part %s: fit the seed already bought (facing check)" % part.get("name", "?"), LLM_CALL_ALLOWANCE_USD))
-        else:
-            steps.append(("added part %s: picture + seed" % part.get("name", "?"),
-                          image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD + price(config.SEED_MODEL, seed_payload)))
     steps.append(("director chat overhead", 2 * LLM_CALL_ALLOWANCE_USD))
     return steps
 
 
-SEED_STEPS = ("3D seed", "extra views for multiview seeding", "hybrid repaint of the seed")
+SEED_STEPS = ("3D seed", "extra views for multiview seeding")
 PICTURE_STEPS = ("concept picture", "clean up your reference picture", "find a photo of", "check the picture",
                  "second picture attempt")
 
@@ -285,10 +255,9 @@ def estimate_after_reference(spec):
 
 
 def estimate_rework(spec, mode="refinish"):
-    """Worst case of finishing an EXISTING mesh: no main seed and no reference pictures (a retexture keeps the picture
-    steps for its guide picture). The cockpit and part seeds the finish may still buy stay in (an imported A-10 cost
-    $0.76 of cockpit against a 12-credit hold, 2026-09-23)."""
+    """Worst case of finishing an EXISTING mesh: no seed and no reference pictures, only the probe, masks, rig and
+    review calls of the finish."""
     steps = [(name, usd) for name, usd in _estimate_steps(spec)       # a rework finishes one mesh, never an assembly
-             if not name.startswith(SEED_STEPS) and (mode == "retexture" or not name.startswith(PICTURE_STEPS))]
+             if not name.startswith(SEED_STEPS) and not name.startswith(PICTURE_STEPS)]
     usd = sum(u for _, u in steps)
     return {"steps": steps, "usd": round(usd, 4), "credits": config.credits_for_usd(usd)}

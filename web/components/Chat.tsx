@@ -79,7 +79,7 @@ function ModelPicker({
           ))}
         </select>
       </label>
-      <label title="The model that draws the reference picture, the extra angles, cockpit and part pictures for this session">
+      <label title="The model that draws the reference picture, the extra angles and the assembly part pictures for this session">
         Pictures
         <select
           value={settings.picture_model || options.defaults.picture_model}
@@ -477,20 +477,11 @@ function ChatSession({
                             onPick={(answer) => sendMessage({ text: answer }, { body: { attachments: [], settings } })}
                           />
                         )}
-                        {p.data.pictures?.length > 0 && (
+                        {p.data.pictures?.length > 0 && (p.data.pictures_kind ?? "reference") === "reference" && (
                           <Pictures
                             urls={p.data.pictures}
-                            kind={p.data.pictures_kind ?? "reference"}
                             onApprove={() =>
-                              sendMessage(
-                                {
-                                  text:
-                                    p.data.pictures_kind === "removal"
-                                      ? "Confirmed: delete the red areas and re-finish."
-                                      : "Go: build from this picture.",
-                                },
-                                { body: { attachments: [], settings } },
-                              )
+                              sendMessage({ text: "Go: build from this picture." }, { body: { attachments: [], settings } })
                             }
                             onChange={() => document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus()}
                             busy={busy}
@@ -593,24 +584,21 @@ function ChatSession({
 
 function Pictures({
   urls,
-  kind,
   onApprove,
   onChange,
   busy,
 }: {
   urls: { label: string; url: string }[];
-  kind: "reference" | "removal";
   onApprove: () => void;
   onChange: () => void;
   busy: boolean;
 }) {
-  const removal = kind === "removal";
   return (
     <div className="pictures">
       <div className="pictures-row">
         {urls.map((p, i) => {
           const src = p.url.replace(/^\/v1\//, "/api/");
-          const caption = removal ? p.label : i === 0 ? "reference" : p.label.replace(/^orthographic /, "");
+          const caption = i === 0 ? "reference" : p.label.replace(/^orthographic /, "");
           return (
             <figure key={p.url}>
               <a href={src} target="_blank" rel="noreferrer">
@@ -629,13 +617,13 @@ function Pictures({
       </div>
       <div className="pictures-actions">
         <button type="button" onClick={onApprove} disabled={busy}>
-          {removal ? "Delete the red areas" : "Build from this"}
+          Build from this
         </button>
         <button type="button" className="ghost" onClick={onChange} disabled={busy}>
-          {removal ? "Not that, reword…" : "Change something…"}
+          Change something…
         </button>
         <span className="dim">
-          {removal ? "Nothing is deleted until you confirm." : "The mesh is bought only after you approve the picture."}
+          The mesh is bought only after you approve the picture.
         </span>
       </div>
     </div>

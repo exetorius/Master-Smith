@@ -9,8 +9,6 @@ import subprocess
 import shutil
 
 from .. import config
-from .cockpit import make_cockpit
-from .parts import make_added_part, make_part_seed, orient_added_part
 from .tiles import make_tiles
 from .probe import run_probe
 
@@ -36,85 +34,21 @@ def _blender(job, script, args, tag):
         raise RuntimeError("Blender %s failed (exit %s); see %s\n%s\n%s" % (script, proc.returncode, log_path, tail, err))
 
 
-def families_for(spec, skill):
-    """The skill's material families that apply to THIS brief: an entry with "only_if" words needs one of them in the
-    description or name (the weapon skill's blade family swallowed 44k faces of an M4A1, 2026-09-24)."""
-    fams = skill["meta"].get("material_families")
-    if not isinstance(fams, list):
-        return None
-    blob = ((spec.description or "") + " " + (spec.name or "") + " " + (spec.notes or "")).lower()
-    out = []
-    for fam in fams:
-        words = fam.get("only_if") if isinstance(fam, dict) else None
-        if words and not any(str(w).lower() in blob for w in words):
-            continue
-        out.append(fam)
-    return out
-
-
-def run_finish(job, skill, seed_glb, reference=None, retexture_maps=None, recolor=None, reference_source=None):
-    """reference_source: "concept" (drawn), "customer" or "research" (a photograph). The reference is projected back onto
-    the mesh only when it was drawn: a photograph's studio lighting projected onto a rifle is what the reviewer called
-    'baked from a 2D photograph' (M4A1, 2026-09-24)."""
+def run_finish(job, skill, seed_glb, reference=None):
+    """Package one seed mesh: orient, scale, glass slot, maps, LODs, collision, renders, exports. Nothing here repairs
+    the mesh; a wrong shape, part or colour is a new build (2026-09-26)."""
     spec = job.spec
-    skill = {**skill, "meta": {**skill["meta"], "material_families": families_for(spec, skill)}}
-    if skill["meta"]["material_families"] is None:
-        skill["meta"].pop("material_families")
     common = {"name": spec.name, "work_dir": job.work_dir, "out_dir": os.path.join(job.dir, "delivery"),
               "tri_budget": spec.tri_budget, "size_m": spec.size_m, "engine": spec.engine,
               "forward_axis": skill["meta"].get("forward_axis", "long"), "origin": skill["meta"].get("origin", "bottom"),
               "spec": spec.portable(), "reference": reference}
     job.log("  Blender pass 1: orient, scale to %.2f m, probe renders" % spec.size_m)
-    _blender(job, "prepare.py", {**common, "glb": seed_glb, "probe_size": 896, "retexture_maps": retexture_maps,
-                                 "keep_old_maps": bool(retexture_maps)}, "prepare")
+    _blender(job, "prepare.py", {**common, "glb": seed_glb, "probe_size": 896}, "prepare")
     job.log("  deciding: facing%s%s" % (", glass" if spec.glass and skill["meta"].get("glass_prompt") else "",
                                         ", wheels" if spec.rig and skill["meta"].get("rig_parts_prompt") else ""))
     decision = run_probe(job, skill)
-    cockpit = None
-    if spec.cockpit and (decision.get("regions") or {}).get("glass"):
-        job.log("  cockpit: a second model for the space under the canopy")
-        try:
-            cockpit = make_cockpit(job, spec, reference)
-        except Exception as exc:  # noqa: BLE001 - no cockpit is better than no aircraft
-            job.log("  cockpit skipped: %s" % str(exc)[:160])
-    part_seeds = []
-    seed_defs = skill["meta"].get("part_seeds") if isinstance(skill["meta"].get("part_seeds"), list) else []
-    regions = decision.get("regions") or {}
-    for i, sd in enumerate(seed_defs[:3]):
-        if not regions.get("seed%d" % i):
-            continue
-        job.log("  part seed: %s" % sd.get("phrase"))
-        try:
-            ps = make_part_seed(job, spec, sd, reference) if reference else None
-            if ps:
-                part_seeds.append({**ps, "index": i})
-        except Exception as exc:  # noqa: BLE001 - the body ships without the part seed
-            job.log("  part seed %s skipped: %s" % (sd.get("name"), str(exc)[:160]))
-    added = []
-    for i, part in enumerate(spec.add_parts or []):
-        job.log("  add part: %s (%s %s)" % (part["phrase"], part["place"], part["anchor"]))
-        try:
-            ap = make_added_part(job, spec, part, reference)
-            if ap:
-                oriented = orient_added_part(job, spec, part, ap["glb"]) or {}
-                added.append({**ap, **oriented, "index": i, "place": part["place"], "anchor": part["anchor"], "size_m": part["size_m"],
-                              "offset_m": part.get("offset_m") or [0, 0, 0]})
-        except Exception as exc:  # noqa: BLE001 - the body ships without the part
-            job.log("  add part %s skipped: %s" % (part["name"], str(exc)[:160]))
-    job.log("  Blender pass 2: glass slot%s, maps, LODs to %s tris, collision, export" % (
-        " + cockpit" if cockpit else "", format(spec.tri_budget, ",")))
-    _blender(job, "finish.py", {**common, "render_size": 768, "cockpit_glb": (cockpit or {}).get("glb"),
-                                "cockpit_parametric": bool(spec.cockpit and regions.get("glass") and not cockpit),
-                                "cockpit_seats": 2 if "two-seat" in (spec.description or "").lower() or "tandem" in (spec.description or "").lower() else 1,
-                                "retexture_parts": spec.retexture_parts if retexture_maps else None,
-                                "recolor_parts": recolor, "protect_parts": spec.protect_parts,
-                                "remove_parts": list(spec.remove_parts or []) or None,
-                                "texture_fixes": list(spec.texture_fixes or []) or None,
-                                "material_families": skill["meta"].get("material_families") if isinstance(skill["meta"].get("material_families"), list) else None,
-                                "bake_detail": True,
-                                "reproject": bool(skill["meta"].get("reproject", False)) and reference_source in (None, "concept"),
-                                "repair_cylinders": skill["meta"].get("repair_cylinders") if isinstance(skill["meta"].get("repair_cylinders"), list) else None,
-                                "part_seeds": part_seeds or None, "add_parts": added or None}, "finish")
+    job.log("  Blender pass 2: glass slot, maps, LODs to %s tris, collision, export" % format(spec.tri_budget, ","))
+    _blender(job, "finish.py", {**common, "render_size": 768, "bake_detail": True}, "finish")
     report_path = os.path.join(common["out_dir"], "report.json")
     if not os.path.exists(report_path):
         log_path = os.path.join(job.work_dir, "finish.log")
@@ -141,8 +75,7 @@ def run_finish(job, skill, seed_glb, reference=None, retexture_maps=None, recolo
         except Exception as exc:  # noqa: BLE001 - the asset ships without tiles
             job.log("  tiles skipped: %s" % str(exc)[:160])
     for note in report.get("notes", []):
-        if any(w in note for w in ("recolour", "repaint", "protected", "dropped", "WARNING", "cockpit", "canopy", "glass:", "material family", "baked",
-                                  "bake ", "removed", "part seed", "cylinder", "reproject")):
+        if any(w in note for w in ("dropped", "WARNING", "canopy", "glass:", "baked", "bake ")):
             job.log("  blender: %s" % note[:220])
     job.log("  finished: %s tris LOD0, %d maps, %d files%s" % (
         format(report["lods"][0]["triangles"], ","), len(report["maps"]), len(report["files"]),

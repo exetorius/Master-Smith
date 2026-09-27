@@ -68,34 +68,14 @@ P=$(curl -s -H "$H" -F "file=@my_rifle.glb" $MS/v1/uploads | jq -r .path)
 curl -s -H "$H" -H "Content-Type: application/json" $MS/v1/jobs/import -d "{\"path\": \"$P\", \"spec\": {\"name\": \"Rifle\", \"category\": \"weapon\", \"size_m\": 1.2, \"glass\": true}}"
 ```
 
-Re-finish an earlier job's mesh with a changed brief (no new mesh is bought):
+Re-finish an earlier job's mesh with a changed brief (no new mesh is bought, nothing on the mesh is repaired):
 
 ```bash
 curl -s -H "$H" -H "Content-Type: application/json" $MS/v1/jobs/refinish -d "{\"source_job\": \"$JOB\", \"overrides\": {\"tri_budget\": 80000, \"rig\": true}}"
 ```
 
-Delete a part the vendor grew, in Blender, and re-finish (cents: masks, a facing check, the review):
-
-```bash
-curl -s -H "$H" -H "Content-Type: application/json" $MS/v1/jobs/refinish -d "{\"source_job\": \"$JOB\", \"overrides\": {\"remove_parts\": [\"the extra cylinder attached to the magazine\"]}}"
-```
-
-The first call answers a **preview**, not a job: `{"status": "preview_removal", "pictures": [{label, url, coverage}]}`
-with the source job's renders and the faces that would go tinted red. Look at them. Repeat the call with
-`?confirm_removal=1` to queue the re-finish, or reword the phrase and preview again. The `debug` answer of the
-finished job lists `removed_parts` with the face counts; a phrase whose mask found nothing, or covered more than 30%
-of the object, deletes nothing and says so in the log.
-
-Model an attachment on its own and fit it onto the existing mesh (no new body; the part's picture + one seed, about $0.80):
-
-```bash
-curl -s -H "$H" -H "Content-Type: application/json" $MS/v1/jobs/refinish -d "{\"source_job\": \"$JOB\", \"overrides\": {\"add_parts\": [{\"name\": \"CockpitInterior\", \"phrase\": \"the cockpit interior: pilot seat, instrument panel and side consoles\", \"anchor\": \"glass\", \"place\": \"inside\", \"size_m\": 2.2}]}}"
-```
-
-`anchor` is a phrase for the segmenter ("the top rail"), `glass` (the canopy faces) or `body`; `place` is one of
-`inside`, `on_top`, `in_front`, `behind`, `below`; `size_m` is the part's longest dimension (0 = fit to the anchor's
-box); `picture` may name an uploaded file to seed the part from. The finished job's `debug` answer lists
-`added_parts` with the scale, the part's size and the anchor box it was fitted to.
+A re-finish changes size, triangle budget, engine, rig or glass. A change you would see (a part, a shape, a colour)
+is a new build: edit the reference pictures (`edit_instructions` + `/v1/reference`) and queue a build from them.
 
 ## Watch and debug
 

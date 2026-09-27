@@ -12,15 +12,6 @@ SEED_FACE_MIN, SEED_FACE_MAX = 150_000, 600_000
 MESHY_MAX_POLYCOUNT = 300_000          # fal answers 422 "less than or equal to 300000" above this (wave 17, 2026-09-18)
 
 
-def hybrid_wanted(spec):
-    h = getattr(spec, "hybrid", None)
-    if h is None:
-        h = config.HYBRID_DEFAULT
-    if h is None:
-        h = spec.category in config.HYBRID_CATEGORIES
-    return bool(h)
-
-
 def quad_wanted(spec):
     return config.SEED_QUAD if config.SEED_QUAD is not None else spec.category in config.HARD_SURFACE_CATEGORIES
 
@@ -47,8 +38,6 @@ def hi3d_views(spec, urls):
 def seed_payload(spec, urls):
     face_limit = max(SEED_FACE_MIN, min(SEED_FACE_MAX, spec.tri_budget * SEED_FACE_MULTIPLIER))
     alt = (getattr(spec, "seed_vendor", None) or os.environ.get("MASTERSMITH_SEED_MODEL", "")).strip().lower()
-    if not alt and hybrid_wanted(spec) and config.HYBRID_SEED != "tripo":
-        alt = config.HYBRID_SEED          # "meshy7mv" as before; "tripo" keeps Tripo's geometry under the repaint
     if alt == "hitem3d3mv":
         if len(urls) >= 2:
             return config.SEED_HI3D_MULTIVIEW, {**hi3d_views(spec, urls), "model": "hi3dv3.0", "resolution": "2048quality",

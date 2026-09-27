@@ -106,17 +106,11 @@ def _upload_path_ok(path):
 
 def _foreign_paths(spec_dict):
     """Local paths in a brief that point outside the uploads and job folders. The pipeline copies a brief's pictures
-    into the job and uploads them to fal's CDN and hands its part meshes to Blender, so a brief from the API or the
-    director may only name files this service stored (URLs stay allowed for pictures). The CLI passes local photos
-    straight to the pipeline and is not checked here."""
+    into the job and uploads them to fal's CDN, so a brief from the API or the director may only name files this
+    service stored (URLs stay allowed). The CLI passes local photos straight to the pipeline and is not checked here."""
     d = spec_dict or {}
     bad = []
     pictures = [d.get("reference_image")] + list(d.get("reference_images") or [])
-    for p in d.get("add_parts") or []:
-        if isinstance(p, dict):
-            pictures.append(p.get("picture"))
-            if p.get("seed") and not _upload_path_ok(p["seed"]):
-                bad.append(str(p["seed"]))
     for pic in pictures:
         if not pic or (isinstance(pic, str) and pic.startswith(("http://", "https://"))):
             continue
@@ -149,8 +143,7 @@ def last_seed(user, job_id):
 
 def _enqueue(user, spec, kind, source=None):
     if kind in ("refinish", "rework"):     # the seed is reused; only the finishing calls are held
-        mode = (source or {}).get("mode") if isinstance(source, dict) else "refinish"
-        est = pricing.estimate_rework(spec, mode)
+        est = pricing.estimate_rework(spec)
     else:
         est = pricing.estimate(spec)
     credits = est["credits"]
@@ -164,78 +157,25 @@ def _enqueue(user, spec, kind, source=None):
     return {"job_id": job_id, "status": "queued", "kind": kind, "estimate_credits": credits, "balance": bal}
 
 
-def run_removal_preview(user, source_dir, spec):
-    """Red-on-render pictures of what remove_parts would delete, registered as a finished job so they are served."""
-    from .pipeline import preview_removal_job
-    from .providers import ProviderBalanceLow
-    job_id = new_job_id()
-    store.enqueue(job_id, user, "removal_preview", spec.to_dict(), source_job=source_dir)
-    store.mark_running(job_id)
-    try:
-        r = preview_removal_job(source_dir, spec, user, wallet, log=lambda m: store.append_log(job_id, m), job_id=job_id)
-    except ProviderBalanceLow as exc:
-        store.finish(job_id, "refused", error=str(exc))
-        return {"job_id": job_id, "status": "refused", "error": str(exc)}
-    store.finish(job_id, r["status"], result=r, error=r.get("error"))
-    pics = [{"label": p["label"], "url": "/v1/jobs/%s/files/%s" % (job_id, os.path.basename(p["path"])), "coverage": p.get("coverage")}
-            for p in (r.get("pictures") or [])]
-    return {"job_id": job_id, "status": "preview_removal" if r["status"] == "done" else r["status"], "error": r.get("error"),
-            "pictures": pics, "usd_cost": (r.get("bill") or {}).get("usd_cost"),
-            "next": ("The red areas are what will be deleted. Ask the customer to confirm, then call build with "
-                     "confirm_removal=true; if the red covers the wrong thing, reword remove_parts (or drop it) and try again.")}
-
-
-def _reuse_part_seeds(user, spec):
-    """An added part whose mesh an earlier finished job of this user already bought (same name and phrase) keeps that
-    mesh: a re-finish changes the fit, the budget or the body, not the $0.65 seed (the Havoc interior, 2026-09-24)."""
-    open_parts = [p for p in (spec.add_parts or []) if not p.get("seed")]
-    if not open_parts:
-        return spec
-    for row in store.jobs_for(user, limit=60):
-        if row["status"] != "done":
-            continue
-        full = store.job(row["id"], user) or {}
-        d = ((full.get("result") or {}).get("dir")) or ""
-        prev = {(p.get("name"), p.get("phrase")): p for p in ((full.get("spec") or {}).get("add_parts") or [])}
-        for p in open_parts:
-            if p.get("seed") or (p["name"], p["phrase"]) not in prev:
-                continue
-            for ext in (".fbx", ".glb"):
-                path = os.path.join(d, "part_%s_seed%s" % (p["name"], ext))
-                if d and os.path.exists(path):
-                    p["seed"] = path
-                    pic = os.path.join(d, "part_%s_ref_0.png" % p["name"])
-                    p["picture"] = p.get("picture") or (pic if os.path.exists(pic) else None)
-                    break
-        if all(p.get("seed") for p in open_parts):
-            break
-    return spec
-
-
-def submit_build(user, spec_dict, seed=None, confirm_removal=False):
-    """Queue a build. With `seed` (the session's current model): a repaint keeps the mesh, a change that keeps the
-    shape re-finishes it, and a change of shape edits the previous picture rather than redrawing from the text.
-    New remove_parts are previewed (red on the renders) and queued only once confirmed."""
+def submit_build(user, spec_dict, seed=None):
+    """Queue a build. With `seed` (the session's current model): a change that keeps the shape (size, budget, engine,
+    rig, glass) re-finishes the same mesh; any other change (shape, parts, colours, materials) is a new build whose
+    picture is edited from the previous one, so everything unmentioned stays as it was. Nothing repairs a mesh."""
     bad = _foreign_paths(spec_dict)
     if bad:
         return _refuse_paths(bad)
     spec = Spec.from_dict(spec_dict)
     from .spec import assembly_wanted
-    if seed and assembly_wanted(spec) and not spec.remove_parts:
+    if seed and assembly_wanted(spec):
         # an assembly is built from the approved pictures, never by re-finishing the chat's previous mesh
         return _enqueue(user, spec, "build")
     if seed:
-        same_shape = all(spec_dict.get(k) == seed["spec"].get(k) for k in ("description", "category", "style"))
+        same_shape = all(spec_dict.get(k) == seed["spec"].get(k)
+                         for k in ("description", "category", "style", "edit_instructions"))
         if (spec.seed_vendor or "tripo") != (seed["spec"].get("seed_vendor") or "tripo"):
             same_shape = False                      # another mesh vendor is another mesh: seed again from the same pictures
-        new_removals = [p for p in spec.remove_parts if p not in (seed["spec"].get("remove_parts") or [])]
-        if new_removals and not confirm_removal:
-            source_dir = os.path.dirname(os.path.dirname(seed["glb"])) if os.path.basename(os.path.dirname(seed["glb"])) == "work" \
-                else os.path.dirname(seed["glb"])
-            return run_removal_preview(user, source_dir, spec)
-        _reuse_part_seeds(user, spec)
-        if spec.retexture:
-            return _enqueue(user, spec, "rework", {"seed": seed["glb"], "ref": seed["ref"], "mode": "retexture"})
+        if spec.reference_job and spec.reference_job != seed["spec"].get("reference_job"):
+            same_shape = False                      # newly approved pictures are built from, never ignored by a re-finish
         if same_shape:
             return _enqueue(user, spec, "rework", {"seed": seed["glb"], "ref": seed["ref"], "mode": "refinish"})
         if seed["ref"] and not spec.reference_images:
@@ -290,18 +230,11 @@ def submit_import(user, path, spec_dict):
 
 def job_view(row, user):
     from .quality import assess
-    from .diagnose import diagnose
     r = row.get("result") or {}
     delivery = r.get("delivery") or {}
-    quality = assess(Spec.from_dict(row["spec"]), delivery, r.get("review"))
     # Older jobs stored "usable" even when their reviewer said rebuild. Do not feed that stale conclusion
     # back to the director after an upgrade; preserve the historical files, correct the live status view.
-    diagnosis = diagnose(r, os.path.join(r.get("dir") or "", "work"), Spec.from_dict(row["spec"])) if r else []
-    if not quality["accepted"]:
-        diagnosis = [d for d in diagnosis if not d.get("finding", "").startswith("reviewer ")]
-        diagnosis.insert(0, {"finding": "not accepted: " + "; ".join(quality["issues"]),
-                             "remedy": "inspect the requested repair; technical completion is not visual acceptance",
-                             "fix": None})
+    quality = assess(Spec.from_dict(row["spec"]), delivery, r.get("review"))
     gate = dict(r.get("gate") or {})
     if gate:
         gate["technical_ok"] = gate.get("technical_ok", bool(gate.get("ok")))
@@ -317,11 +250,7 @@ def job_view(row, user):
             "summary": {"lods": delivery.get("lods"), "dimensions_m": delivery.get("dimensions_m"),
                         "glass": delivery.get("glass"), "materials": delivery.get("materials"),
                         "review": r.get("review"), "gate": gate or None, "package": r.get("package"),
-                        "diagnosis": diagnosis, "quality": quality,
-                        "added_parts": delivery.get("added_parts"), "cockpit": delivery.get("cockpit"),
-                        "cabin_lining": delivery.get("cabin_lining"), "review_renders": delivery.get("review_renders"),
-                        "source_renders": delivery.get("source_renders"), "inspection_renders": delivery.get("inspection_renders"),
-                        "bake": delivery.get("bake"),
+                        "quality": quality, "source_renders": delivery.get("source_renders"), "bake": delivery.get("bake"),
                         "rig": {k: v for k, v in (r.get("rig") or {}).items() if k != "notes"},
                         "bill": {k: v for k, v in (r.get("bill") or {}).items() if k not in ("fal_calls", "llm_calls", "image_calls")}},
             "files": ["/v1/jobs/%s/files/%s" % (row["id"], f) for f in files],
@@ -357,8 +286,7 @@ def _session(session_id, user):
                 return {**spec_dict, "seed_vendor": spec_dict.get("seed_vendor") or (sv if sv and sv != "tripo" else None),
                         "picture_model": spec_dict.get("picture_model") or (pm if pm and pm != config.CONCEPT_MODEL else None)}
 
-            d.submit = lambda spec_dict, confirm_removal=False: submit_build(
-                user, with_settings(spec_dict), seed=last_seed(user, d.last_job_id), confirm_removal=confirm_removal)
+            d.submit = lambda spec_dict: submit_build(user, with_settings(spec_dict), seed=last_seed(user, d.last_job_id))
             d.import_model = lambda path, spec_dict: submit_import(user, path, spec_dict)
             d.make_reference = lambda spec_dict: run_reference(user, with_settings(spec_dict))
             d.job_status = lambda job_id: (lambda row: job_view(row, user) if row else {"error": "unknown job"})(store.job(job_id, user))
@@ -378,7 +306,7 @@ def _session_settings(session_id, user):
 # ------------------------------------------------------------------ chats on disk
 # Every chat is a folder: <data>/chats/<user>/<session>/chat.json holds the director's transcript, the brief, the
 # approved reference, the settings, the jobs it made and the turns the web shows. Reloading a chat restores all of
-# it, so a model built last week can be re-finished, repainted or repaired today.
+# it, so a model built last week can be re-finished or built again from its pictures today.
 CHATS_DIR = config.DATA_DIR / "chats"
 _SAFE = re.compile(r"[^A-Za-z0-9_-]")
 
@@ -675,9 +603,8 @@ def import_job(body: ImportIn, who=Depends(auth)):
 
 
 @app.post("/v1/jobs/refinish")
-def refinish_job(body: RefinishIn, confirm_removal: bool = False, who=Depends(auth)):
-    """Re-finish an earlier job's seed with a changed brief. New remove_parts answer a removal preview (red on the
-    renders) until the call is repeated with ?confirm_removal=1."""
+def refinish_job(body: RefinishIn, who=Depends(auth)):
+    """Re-finish an earlier job's seed with a changed brief (size, budget, engine, rig, glass)."""
     src = store.job(body.source_job, who["user"])
     if not src or not (src.get("result") or {}).get("dir"):
         raise HTTPException(404, "source job not found or has no output")
@@ -685,10 +612,6 @@ def refinish_job(body: RefinishIn, confirm_removal: bool = False, who=Depends(au
     if bad:
         raise HTTPException(400, _refuse_paths(bad))
     spec = Spec.from_dict({**src["spec"], **body.overrides})
-    new_removals = [p for p in spec.remove_parts if p not in (src["spec"].get("remove_parts") or [])]
-    if new_removals and not confirm_removal:
-        return run_removal_preview(who["user"], src["result"]["dir"], spec)
-    _reuse_part_seeds(who["user"], spec)
     return _enqueue(who["user"], spec, "refinish", src["result"]["dir"])
 
 
@@ -723,7 +646,7 @@ def get_file(job_id: str, name: str, who=Depends(auth)):
     return FileResponse(path, media_type=mimetypes.guess_type(name)[0] or "application/octet-stream", filename=name)
 
 
-PICTURE_PREFIXES = ("ref_", "cockpit_ref_", "remove_preview_", "part_", "customer_ref_")
+PICTURE_PREFIXES = ("ref_", "customer_ref_")
 
 
 def _recorded_views(result):
@@ -731,7 +654,7 @@ def _recorded_views(result):
 
 
 def job_pictures(row):
-    """The pictures a job drew or was given (reference views, cockpit and part pictures, removal previews), as URLs.
+    """The pictures a job drew or was given (reference views, the customer's pictures), as URLs.
     A build from approved pictures lists the views it recorded, which live in the reference job's folder."""
     r = row.get("result") or {}
     d = r.get("dir")
@@ -765,8 +688,8 @@ def healthz():
 
 # ------------------------------------------------------------------ debugging and testing from scripts and agents
 SAFE_CONFIG = ("DIRECTOR_MODEL", "VISION_MODEL", "PREMIUM_MODEL", "CONCEPT_MODEL", "CONCEPT_MODEL_PREMIUM", "CONCEPT_MODEL_HARD",
-               "EDIT_MODEL", "IMAGE_RESOLUTION", "SEED_MODEL", "SEED_MULTIVIEW_MODEL", "RETEXTURE_MODEL", "REPAINT_DEFAULT",
-               "HYBRID_SEED", "SEED_QUAD", "HARD_SURFACE_CATEGORIES", "BLENDER_BIN", "API_USER")
+               "EDIT_MODEL", "IMAGE_RESOLUTION", "SEED_MODEL", "SEED_MULTIVIEW_MODEL", "SEED_QUAD", "HARD_SURFACE_CATEGORIES",
+               "BLENDER_BIN", "API_USER")
 
 
 @app.get("/v1/config")
@@ -881,7 +804,7 @@ def run_tool(session_id: str, body: ToolIn, who=Depends(auth)):
     d = sess["director"]
     fn = {"set_brief": d._set_brief, "build": d._build, "read_skill": d._read_skill, "balance": d._balance,
           "job_status": d._job_status, "import_model": d._import_model, "make_reference": d._make_reference,
-          "ask_customer": d._ask, "plan_repair": d._plan_repair}.get(body.name)
+          "ask_customer": d._ask}.get(body.name)
     if not fn:
         raise HTTPException(404, "no such tool: %s" % body.name)
     try:

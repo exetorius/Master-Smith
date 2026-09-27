@@ -26,9 +26,13 @@ def run_one(store, wallet, row):
         if row["kind"] == "refinish":
             result = pipeline.refinish(row["source_job"], row["user"], wallet, row["spec"], log=log, job_id=job_id)
         elif row["kind"] == "rework":
-            src = json.loads(row["source_job"] or "{}")      # {"seed": path, "ref": path|None, "mode": refinish|retexture}
+            src = json.loads(row["source_job"] or "{}")      # {"seed": path, "ref": path|None, "mode": "refinish"}
+            if (src.get("mode") or "refinish") != "refinish":
+                # a retexture queued before the post-op repairs were removed (2026-09-26): a colour change is a new build
+                store.finish(job_id, "failed", error="the %s mode no longer exists; build the asset again" % src["mode"])
+                return
             result = pipeline.rework(src["seed"], Spec.from_dict(row["spec"]), row["user"], wallet, ref_view=src.get("ref"),
-                                     mode=src.get("mode") or "refinish", log=log, job_id=job_id)
+                                     log=log, job_id=job_id)
         else:
             result = pipeline.build(Spec.from_dict(row["spec"]), row["user"], wallet, log=log, job_id=job_id)
         store.finish(job_id, result["status"], result=result, error=result.get("error"))

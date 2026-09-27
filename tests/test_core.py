@@ -61,8 +61,8 @@ def test_seed_payload_switches_to_multiview_with_two_views():
     s = Spec(name="A", description="x", category="weapon")
     model, p = seed_payload(s, ["u1"])
     assert model == config.SEED_MODEL and p["image_url"] == "u1" and p["face_limit"] == 360000
-    h = Spec(name="A", description="x", category="weapon", hybrid=True)      # the hybrid seed is opt-in (2026-09-18)
-    assert seed_payload(h, ["u1", "u2"])[0] == "fal-ai/meshy/v7/multi-image-to-3d"
+    m = Spec(name="A", description="x", category="weapon", seed_vendor="meshy7mv")
+    assert seed_payload(m, ["u1", "u2"])[0] == "fal-ai/meshy/v7/multi-image-to-3d"
     model, p = seed_payload(s, ["u1", "u2", "u3"])
     assert model == config.SEED_MULTIVIEW_MODEL and p["image_urls"] == ["u1", "u2", "u3"]
     tiny = Spec(name="A", description="x", category="prop", tri_budget=2000)
@@ -76,39 +76,6 @@ def test_weapon_glass_follows_the_caption():
     assert Spec(name="R", description="a pistol with a red-dot sight and a weapon light", category="weapon").glass is True
     assert Spec(name="R", description="a plain rifle", category="weapon", glass=True).glass is True      # an explicit ask wins
     assert Spec(name="R", description="a sedan", category="vehicle").glass is True
-
-
-def test_part_seeds_need_a_hero_budget_or_an_ask_not_premium():
-    from mastersmith.stages.parts import part_denied_by_brief, part_present
-    steps = lambda s: [n for n, _ in pricing.estimate(s)["steps"]]              # noqa: E731
-    assert not any("separately seeded" in n for n in steps(Spec(build_mode="single", name="R", description="rifle", category="weapon", premium=True)))
-    assert any("separately seeded" in n for n in steps(Spec(build_mode="single", name="R", description="rifle", category="weapon", tri_budget=150000)))
-    assert any("separately seeded" in n for n in steps(Spec(build_mode="single", name="R", description="rifle", category="weapon", part_seeds=[{"phrase": "x"}])))
-    bull = Spec(build_mode="single", name="B", description="a bullpup carbine, no sling, no hands, no scope.", category="weapon")
-    assert part_denied_by_brief(bull, "the optic or scope mounted on top of the gun") == "scope"
-    assert part_denied_by_brief(bull, "the detachable magazine of the gun") is None
-    assert part_denied_by_brief(Spec(build_mode="single", name="B", description="a rifle without a magazine", category="weapon"), "the detachable magazine of the gun") == "magazine"
-
-    class Llm:
-        def __init__(self, answer):
-            self.answer, self.asked = answer, 0
-
-        def vision(self, prompt, files):
-            self.asked += 1
-            return self.answer
-
-    class Job:
-        def __init__(self, answer):
-            self.llm, self.lines = Llm(answer), []
-
-        def log(self, m):
-            self.lines.append(m)
-    j = Job('{"present": false, "confidence": 0.9, "what": "a bare rail"}')
-    assert part_present(j, bull, {"name": "Optic", "phrase": "the optic or scope mounted on top of the gun"}, "ref.png") is False
-    assert j.llm.asked == 0 and "the brief says no scope" in j.lines[-1]        # denied by the brief: no vision call
-    assert part_present(j, bull, {"name": "Magazine", "phrase": "the detachable magazine of the gun"}, "ref.png") is False
-    assert j.llm.asked == 1 and "not seen on the reference" in j.lines[-1]
-    assert part_present(Job('{"present": true, "confidence": 0.8}'), bull, {"name": "Magazine", "phrase": "the detachable magazine of the gun"}, "ref.png") is True
 
 
 def test_hard_surfaces_build_from_parts_unless_the_brief_says_single():
@@ -160,32 +127,35 @@ def test_wallet_keeps_score_of_spend_and_never_refuses():
         w.close()      # Windows cannot remove the temp dir while sqlite holds the file
 
 
-def test_rework_estimate_drops_the_seed_but_keeps_the_cockpit():
-    jet = Spec(build_mode="single", name="Jet", description="grey attack jet", category="aircraft", size_m=-1, cockpit=True)
+def test_rework_estimate_drops_the_seed_and_the_pictures():
+    jet = Spec(build_mode="single", name="Jet", description="grey attack jet", category="aircraft", size_m=-1)
     full = pricing.estimate(jet)
     re = pricing.estimate_rework(jet, "refinish")
     names = [n for n, _ in re["steps"]]
     assert not any(n.startswith("3D seed") for n in names)
     assert not any(n.startswith(pricing.PICTURE_STEPS) for n in names)
-    assert any(n.startswith("cockpit") for n in names)
+    assert any(n.startswith("glass masks") for n in names) and any(n.startswith("review") for n in names)
     assert 0 < re["usd"] < full["usd"]
-    rt = pricing.estimate_rework(Spec(build_mode="single", name="R", description="rifle", category="weapon", retexture=True), "retexture")
-    assert any("repaint of the existing mesh" in n for n, _ in rt["steps"])
 
 
-def test_rework_estimate_drops_the_seed_but_keeps_the_cockpit():
-    jet = Spec(name="Jet", description="grey attack jet", category="aircraft", size_m=-1, cockpit=True)
-    full = pricing.estimate(jet)
-    re = pricing.estimate_rework(jet, "refinish")
-    names = [n for n, _ in re["steps"]]
-    assert not any(n.startswith("3D seed") for n in names)
-    assert not any(n.startswith(pricing.PICTURE_STEPS) for n in names)
-    assert any(n.startswith("cockpit") for n in names)
-    assert 0 < re["usd"] < full["usd"]
-    rt = pricing.estimate_rework(Spec(name="R", description="rifle", category="weapon", retexture=True), "retexture")
-    assert any("repaint of the existing mesh" in n for n, _ in rt["steps"])
-
-
+def test_old_specs_with_the_removed_repair_fields_still_load():
+    """Jobs and chats stored before 2026-09-26 carry the post-op repair fields; they load, and the fields are gone."""
+    old = {"name": "Havoc", "description": "police gunship", "category": "aircraft", "tri_budget": 90000,
+           "texture_fixes": ["delight", "preserve_seed_maps"], "remove_parts": ["the extra cylinder"],
+           "add_parts": [{"name": "Cabin", "phrase": "the cockpit interior", "anchor": "glass", "place": "inside",
+                          "provides": ["seat"], "yaw_degrees": 180}],
+           "retexture": True, "retexture_parts": [{"phrase": "the stock", "color": "#333333"}],
+           "protect_parts": [{"phrase": "the magazine"}], "cockpit": True, "hybrid": True, "repaint": "pictures",
+           "part_seeds": [{"phrase": "the magazine"}]}
+    s = Spec.from_dict(old)
+    assert s.name == "Havoc" and s.category == "aircraft" and s.tri_budget == 90000 and s.glass
+    d = s.to_dict()
+    for gone in ("texture_fixes", "remove_parts", "add_parts", "retexture", "retexture_parts", "protect_parts", "cockpit",
+                 "hybrid", "repaint", "part_seeds"):
+        assert gone not in d, gone
+    assert pricing.estimate(s)["usd"] > 0 and pricing.estimate_rework(s)["usd"] > 0
+    from mastersmith.pipeline import seed_of
+    assert seed_of({"seed": {"repainted_glb": __file__, "glb": None}}) is None      # only the seed the finish ran on
 
 
 def test_reference_lists_and_research_defaults():
@@ -324,33 +294,12 @@ def test_image_client_and_cost_breakdown():
             config.OUT_DIR = old
         job.stage("seed")
         job.fal.calls.append({"usd": 0.6, "stage": job.fal.stage})
-        job.stage("repaint")
+        job.stage("reference")
         job.images.calls.append({"usd": 0.07, "stage": job.images.stage})
         job.llm.calls.append({"usd": 0.01, "stage": job.llm.stage})
         bs = job.by_stage()
-        assert bs["seed"]["usd"] == 0.6 and bs["seed"]["fal_calls"] == 1 and bs["repaint"] == {"usd": 0.08, "pictures": 1, "fal_calls": 0, "llm_calls": 1}
+        assert bs["seed"]["usd"] == 0.6 and bs["seed"]["fal_calls"] == 1 and bs["reference"] == {"usd": 0.08, "pictures": 1, "fal_calls": 0, "llm_calls": 1}
         assert job.breakdown_text().startswith("seed $0.60 (88%)") and abs(job.spent_usd() - 0.68) < 1e-9
-
-
-def test_repaint_mode_and_estimate():
-    from mastersmith.stages.repaint import fit_to_render
-    import numpy as np
-    from PIL import Image
-    assert pricing.repaint_mode(Spec(build_mode="single", name="A", description="x")) in ("meshy", "pictures")
-    assert pricing.repaint_mode(Spec(build_mode="single", name="A", description="x", repaint="pictures")) == "pictures"
-    a = pricing.estimate(Spec(build_mode="single", name="A", description="x", category="weapon", hybrid=True, repaint="meshy"))
-    b = pricing.estimate(Spec(build_mode="single", name="A", description="x", category="weapon", hybrid=True, repaint="pictures"))
-    assert any("Meshy retexture" in n for n, _ in a["steps"]) and any("picture model" in n for n, _ in b["steps"])
-    with tempfile.TemporaryDirectory() as d:
-        ren = np.full((200, 200, 3), 140, np.uint8)
-        ren[40:160, 30:170] = 30
-        pic = np.full((200, 200, 3), 250, np.uint8)
-        pic[70:150, 60:140] = (90, 120, 60)
-        rp, pp, out = [os.path.join(d, n) for n in ("r.png", "p.png", "o.png")]
-        Image.fromarray(ren).save(rp)
-        Image.fromarray(pic).save(pp)
-        path, box, ov = fit_to_render(pp, rp, out)
-        assert path == out and box == (30, 40, 170, 160) and ov > 0.9
 
 
 def test_provider_balances_and_affordability(monkeypatch):
@@ -386,13 +335,6 @@ def test_provider_balances_and_affordability(monkeypatch):
     providers.check_affordable(1e6, unknown)       # an outage never blocks a build
 
 
-def test_cockpit_tub_is_opt_in():
-    jet = Spec(name="Jet", description="grey jet", category="aircraft")
-    assert jet.glass and not jet.cockpit
-    assert Spec(name="Jet", description="grey jet", category="aircraft", cockpit=True).cockpit
-    assert not Spec(name="Car", description="car", category="vehicle", cockpit=True).cockpit
-
-
 def test_reference_estimates_split_the_picture_stage():
     jet = Spec(build_mode="single", name="Jet", description="grey jet", category="aircraft")
     full, pics, rest = pricing.estimate(jet), pricing.estimate_reference(jet), pricing.estimate_after_reference(jet)
@@ -415,15 +357,6 @@ def test_build_reuses_approved_reference_or_fails_loudly(tmp_path):
         load_reference(str(tmp_path))
 
 
-def test_remove_parts_are_normalised_phrases():
-    s = Spec(name="R", description="rifle", category="weapon",
-             remove_parts=["the extra cylinder attached to the magazine", {"phrase": " the sling fused to the stock "}, "", None,
-                           "the extra cylinder attached to the magazine"])
-    assert s.remove_parts == ["the extra cylinder attached to the magazine", "the sling fused to the stock"]
-    assert Spec(name="R", description="rifle").remove_parts == []
-    assert Spec.from_dict({**s.to_dict(), "remove_parts": None}).remove_parts == []
-
-
 def test_estimate_prices_the_chosen_mesh_vendor():
     cat = {v["key"]: v for v in pricing.vendor_catalogue()}
     assert cat["tripo"]["usd"] == 0.6 and cat["hitem3d3"]["usd"] == 2.1 and cat["hitem3d3mv"]["usd"] == 2.1 and cat["hitem3d3mv"]["multiview"]
@@ -434,22 +367,6 @@ def test_estimate_prices_the_chosen_mesh_vendor():
     mv = pricing.estimate(Spec(build_mode="single", name="R", description="rifle", category="weapon", seed_vendor="hitem3d3mv"))
     assert any(n == "3D seed (Hitem3D v3 multi-view (2048))" for n, _ in mv["steps"]) and mv["usd"] == dear["usd"]
     assert pricing.seed_vendor(Spec(build_mode="single", name="R", description="r", seed_vendor="nonsense"))["key"] == "tripo"
-
-
-def test_removal_overlay_tints_the_mask_and_reports_coverage(tmp_path):
-    from PIL import Image
-    from mastersmith.stages.removal import overlay
-    probe = tmp_path / "probe_iso.png"
-    Image.new("RGB", (40, 20), (100, 100, 100)).save(probe)
-    m = Image.new("L", (40, 20), 0)
-    m.paste(255, (0, 0, 10, 20))                      # the left quarter
-    mask = tmp_path / "mask.png"
-    m.save(mask)
-    out = tmp_path / "preview.png"
-    cov = overlay(str(probe), [str(mask)], str(out))
-    assert abs(cov - 0.25) < 1e-6
-    px = Image.open(out).convert("RGB")
-    assert px.getpixel((2, 10))[0] > 180 and px.getpixel((30, 10)) == (100, 100, 100)
 
 
 def test_picture_model_choice_drives_the_estimate_and_the_catalogue():
@@ -463,14 +380,6 @@ def test_picture_model_choice_drives_the_estimate_and_the_catalogue():
     assert pricing.estimate(lite)["usd"] < pricing.estimate(crate)["usd"]
     bogus = Spec(name="Crate", description="oak crate", category="prop", picture_model="nobody/unknown")
     assert pricing.concept_model(bogus) == pricing.concept_model(crate)     # an unknown id falls back to the config
-
-
-def test_texture_fixes_are_a_known_catalogue():
-    from mastersmith.spec import TEXTURE_FIXES
-    s = Spec(name="Jet", description="grey jet", category="aircraft", texture_fixes=["delight", " Dark_Canopy ", "nonsense", "delight"])
-    assert s.texture_fixes == ["delight", "dark_canopy"]
-    assert Spec(name="Jet", description="grey jet").texture_fixes == []
-    assert set(TEXTURE_FIXES) == {"delight", "clear_glass_highlights", "dark_canopy", "kill_highlights", "preserve_seed_maps", "smooth_organic_normals"}
 
 
 def test_director_ask_records_the_question_and_options():
@@ -503,47 +412,13 @@ def test_pictures_come_from_fal_by_default_and_edits_use_the_edit_endpoint():
     assert pricing.concept_model(crate) == "fal-ai/nano-banana-2" and pricing.edit_model(crate) == "fal-ai/nano-banana-2"
 
 
-def test_material_families_are_gated_by_the_brief_and_photos_are_not_reprojected():
-    from mastersmith.stages.finish import families_for
-    weapon = skills.load("weapon")
-    rifle = Spec(name="M4A1Carbine", description="Colt M4A1 carbine, black polymer stock", category="weapon")
-    sword = Spec(name="Claymore", description="two-handed steel sword with a leather grip", category="weapon")
-    assert not any("blade" in f["phrase"] for f in families_for(rifle, weapon))
-    assert any("blade" in f["phrase"] for f in families_for(sword, weapon))
-    assert families_for(rifle, {"meta": {}}) is None
-
-
-def test_diagnosis_names_remedies_from_logs_and_reviewer_words(tmp_path):
-    from mastersmith.diagnose import diagnose
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "finish.log").write_text(
-        "[finish] material family the black plastic pistol grip, buttstock and handguard of the rifle: no faces found\n"
-        "[finish] material family the forged iron or steel blade or axe head: 44291 faces -> metal roughness 0.72 (48% of the atlas)\n"
-        "[finish] reprojected the reference onto the mesh: {}\n"
-        "[finish] kill highlights: 1234 painted-specular texels (2.5% of the used atlas) replaced by their surround (ref lum 0.30)\n")
-    spec = Spec(name="M4A1", description="Colt M4A1 carbine", category="weapon")
-    result = {"seed": {"model": "tripo3d/h3.1/image-to-3d"}, "reference": {"views": ["/x/ref_1.png"]},
-              "review": {"score": 4, "issues": ["Severe baked-in lighting and painted-on specular", "Trigger guard fused"]}, "delivery": {}}
-    d = diagnose(result, str(work), spec, reference_source="research")
-    findings = " | ".join(f["finding"] for f in d)
-    assert "seeded from ONE picture" in findings and "matched nothing" in findings and "covered 48%" in findings
-    assert "projected onto the mesh" in findings and "kill_highlights replaced 1234" in findings
-    fixes = [f["fix"] for f in d if f["fix"]]
-    assert {"seed_vendor": "hitem3d3"} in fixes and any(f.get("texture_fixes") == ["kill_highlights", "delight"] for f in fixes)
-    assert d[0]["finding"].startswith("reviewer 4/10")
-    happy = diagnose({"review": {"score": 8, "issues": []}, "delivery": {}, "reference": {"views": ["a", "b"]}, "seed": {"model": "x"}},
-                     str(work), spec, "concept")
-    assert happy[0]["finding"].startswith("reviewer 8/10")
-
-
 def test_build_refuses_without_approved_reference_pictures():
     from mastersmith.agent import Director
     from mastersmith.wallet import Wallet
     with tempfile.TemporaryDirectory() as d:
         w = Wallet(os.path.join(d, "w.db"))
         director = Director("kev", w, log=lambda m: None)
-        director.submit = lambda spec_dict, confirm=False: {"job_id": "j1", "status": "queued"}
+        director.submit = lambda spec_dict: {"job_id": "j1", "status": "queued"}
         director._set_brief({"name": "Havoc", "description": "police gunship", "category": "aircraft"})
         out = director._build({})
         assert "no approved reference" in out.get("error", "")
@@ -552,6 +427,28 @@ def test_build_refuses_without_approved_reference_pictures():
         assert director._build({}).get("job_id") == "j1"                            # approved pictures for THIS design
         director._set_brief({"description": "a different gunship"})
         assert "no approved reference" in director._build({}).get("error", "")     # the design changed: approve again
+        w.close()
+
+
+def test_a_refinish_of_the_last_job_needs_no_new_pictures():
+    """Size, budget, engine, rig and glass re-finish the same mesh (an imported model has no pictures at all); any change
+    to the design still needs approved pictures."""
+    from mastersmith.agent import Director
+    from mastersmith.wallet import Wallet
+    with tempfile.TemporaryDirectory() as d:
+        w = Wallet(os.path.join(d, "w.db"))
+        director = Director("kev", w, log=lambda m: None)
+        sent = []
+        director.submit = lambda spec_dict: sent.append(spec_dict) or {"job_id": "j2", "status": "queued"}
+        director.import_model = lambda path, spec_dict: {"job_id": "j1", "status": "queued"}
+        director._import_model({"path": "/uploads/rifle.glb", "name": "Rifle", "category": "weapon", "description": "a rifle"})
+        assert director.last_job_id == "j1"
+        director.job_status = lambda jid: {"status": "done", "spec": {"name": "Rifle", "description": "a rifle", "category": "weapon",
+                                                                      "style": "realistic", "edit_instructions": ""}}
+        director._set_brief({"rig": True, "tri_budget": 40000})
+        assert director._build({}).get("job_id") == "j2" and sent[-1]["rig"] is True
+        director._set_brief({"edit_instructions": "make the stock gunmetal"})
+        assert "no approved reference" in director._build({}).get("error", "")
         w.close()
 
 
@@ -568,38 +465,6 @@ def test_single_picture_counts_only_when_the_customer_asked():
         director._set_brief({"single_picture": True})
         assert director.spec.multiview is False
         w.close()
-
-
-def test_add_parts_are_normalised_and_priced():
-    from mastersmith.spec import PLACEMENTS
-    s = Spec(build_mode="single", name="Havoc", description="police gunship", category="aircraft",
-             add_parts=[{"name": "Cockpit interior", "phrase": "the cockpit interior: seat, panel, consoles", "anchor": "glass", "place": "inside", "size_m": "2.2"},
-                        {"phrase": "a 4x scope", "anchor": "the top rail", "place": "sideways"}, {"name": "x"}, "junk"])
-    assert [p["name"] for p in s.add_parts] == ["Cockpitinterior", "scope"]
-    assert s.add_parts[0]["size_m"] == 2.2 and s.add_parts[0]["anchor"] == "glass"
-    assert s.add_parts[1]["place"] == "inside" and s.add_parts[1]["anchor"] == "the top rail"   # an unknown placement falls back
-    assert set(PLACEMENTS) == {"inside", "on_top", "in_front", "behind", "below"}
-    plain = Spec(build_mode="single", name="Havoc", description="police gunship", category="aircraft")
-    with_part = pricing.estimate(s)
-    assert any(n.startswith("added part Cockpitinterior") for n, _ in with_part["steps"]) and with_part["usd"] > pricing.estimate(plain)["usd"]
-    rw = pricing.estimate_rework(s, "refinish")
-    assert any(n.startswith("added part") for n, _ in rw["steps"])
-
-
-def test_add_parts_keep_a_bought_seed_and_price_it_as_a_fit():
-    s = Spec(build_mode="single", name="Havoc", description="gunship", category="aircraft",
-             add_parts=[{"name": "CockpitInterior", "phrase": "the cockpit interior", "anchor": "glass", "seed": "/x/part_CockpitInterior_seed.fbx"}])
-    assert s.add_parts[0]["seed"] == "/x/part_CockpitInterior_seed.fbx"
-    steps = dict(pricing.estimate(s)["steps"])
-    fit = [k for k in steps if k.startswith("added part CockpitInterior")]
-    assert fit and "already bought" in fit[0] and steps[fit[0]] < 0.05
-
-
-def test_add_parts_offset_is_three_floats():
-    s = Spec(name="H", description="g", category="aircraft",
-             add_parts=[{"name": "Stick", "phrase": "a flight stick", "anchor": "glass", "offset_m": ["0.3", None]},
-                        {"name": "Pedals", "phrase": "rudder pedals", "anchor": "glass"}])
-    assert s.add_parts[0]["offset_m"] == [0.3, 0.0, 0.0] and s.add_parts[1]["offset_m"] == [0.0, 0.0, 0.0]
 
 
 def test_outside_links_must_resolve_to_public_addresses(monkeypatch, tmp_path):

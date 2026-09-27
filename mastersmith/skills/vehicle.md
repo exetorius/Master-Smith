@@ -3,7 +3,6 @@ reference_view: three-quarter front-left view from slightly above, the whole veh
 second_view: the direct left-side profile
 mirror_as_third_view: false
 forward_axis: long
-material_families: [{"phrase": "the black rubber tyres of the vehicle", "current": "black rubber", "metal": false, "finish": "matte", "roughness": 0.92}, {"phrase": "the chrome or bare metal rims, bumpers and exhaust of the vehicle", "current": "shiny metal", "metal": true, "finish": "satin"}]
 origin: bottom
 default_tris: 120000
 default_size_m: 5.0

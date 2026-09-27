@@ -7,7 +7,7 @@ mesh seeded from it, and a headless Blender finish that makes the mesh engine-re
 metres, glass slot, LODs, collision hull, packed PBR maps, previews, FBX/GLB). You can also hand it a model you
 already have and get the same finish.
 
-It runs on your own **fal.ai** key (pictures, meshes, masks, rigs, the repaint) and **OpenRouter** key (the
+It runs on your own **fal.ai** key (pictures, meshes, masks, rigs) and **OpenRouter** key (the
 director and the vision checks; OpenRouter's image models are available too). Nothing else is required. A typical build costs about a dollar of provider
 spend; the director's chat costs cents.
 
@@ -54,44 +54,29 @@ button. The mesh is bought only after you approve the picture; say what to chang
 then seeds from the approved picture and draws nothing new. Say "skip the preview" to do it in one go.
 
 The dashboard above the chat follows the build: the log, the probe renders, then the finished model in a viewer
-with the files to download. Every picture a job drew (reference angles, cockpit and part pictures, removal
-previews) is listed there too, and each picture shown in the chat has a save link. Output also lands in
-`out/<Name>_<job>/delivery/`.
+with the files to download. Every picture a job drew (the reference angles) is listed there too, and each picture
+shown in the chat has a save link. Output also lands in `out/<Name>_<job>/delivery/`.
 
 The header's three selectors choose, per session, the mesh vendor, the picture model (fal.ai's Nano Banana 2 by
 default; fal's other picture models and OpenRouter's are listed too) and the director model; every label carries
 the price.
 
-Aircraft and helicopters get a glass canopy slot by default. The second "cockpit tub" model fitted under the canopy
-is opt-in (`cockpit: true` in the brief); it is a gamble on the tub's fit.
+Aircraft and helicopters get a glass canopy slot by default; the seed's own interior shows through it.
 
-### Fixing a build without buying another mesh
+### Changing a build
 
-Cheapest remedy first. A texture complaint ("the glass has white reflections painted on it", "the shading is baked
-in", "the canopy looks hollow") is a job for a script: the brief carries `texture_fixes` (`delight`,
-`clear_glass_highlights`, `dark_canopy`) and a free re-finish of the same mesh applies them. "Remove the extra
-cylinder on the magazine" deletes that part in Blender under its mask, after you confirm the red preview, and
-re-finishes (cents). "Make it 2 m" or "rig it" re-finishes the same mesh. "Matte black frame" repaints it. Only a
-change of shape edits the reference picture, shows it for approval, and buys a new mesh. When the reviewer says
-rebuild, the director names the remedy for each issue and asks before spending.
-
-A missing attachment does not need a new body either. "Add the cockpit interior under the canopy, about 2.2 m" or
-"put a 4x scope on the top rail" goes on the brief as `add_parts`: each part names what it is, where it anchors
-(a phrase the segmenter finds on the body, `glass` for the canopy, or `body`), how it sits (`inside`, `on_top`,
-`in_front`, `behind`, `below`) and its longest dimension in metres. The part is pictured and seeded on its own
-(a picture plus one Tripo mesh, about $0.80 a part: the vendor charges the same for a small mesh), then fitted in
-Blender against the anchor's box at that size (the part gets its own orientation pass and a vision check for which end
-is its front, so a seat faces the panel and a scope points forward), its materials named
-`MI_<Asset>_<Part>`, and joined; the body is neither reseeded nor shrunk. The job report lists `added_parts` with
-the scale and box used. A part whose anchor phrase is not found on the renders is placed against the whole body
-and the log says so.
+Nothing is repaired on a finished mesh: the model is built right from its pictures. "Make it 2 m", "80k triangles",
+"rig it", "give it glass" or "for Godot" re-finishes the same mesh (cents). Anything you would see - a wrong, missing
+or extra part, a shape, a colour, a material, a melted detail - edits the reference pictures, shows them for approval
+and builds again; an assembly (below) plans its parts again from the new pictures. When the reviewer says rebuild,
+the director says what the pictures or the brief should change and asks before spending.
 
 ### Bring your own model
 
 Attach a `.glb`, `.gltf`, `.fbx`, `.obj` or a delivered `.blend` in the chat and say what it is. It is finished
 without buying a new mesh: oriented to +X forward, scaled (or kept at its own size), glass detected, LODs, collision,
-maps packed, previews, package. From then on the conversation works on that model: "make it 2 m" re-finishes it,
-"matte black frame" repaints it, "add a bipod" edits the reference picture and buys a new mesh.
+maps packed, previews, package. From then on the conversation works on that model: "make it 2 m" or "rig it"
+re-finishes it; a change you would see is a new build from pictures.
 
 Without the chat:
 
@@ -130,15 +115,18 @@ own when Docker restarts after a reboot; stopped ones stay stopped until you sta
 1. **Reference picture.** A clean product shot generated from the brief, or your own photo edited into one, or a
    photograph of the real thing found on the web when you name it (an F-150, a Glock 17). A vision model checks
    it: one object, plain background, right view. Weapons and vehicles get extra views for multiview seeding.
+   Hard surfaces (weapons, vehicles, aircraft, helicopters) with an approved side and front view are then built as
+   an **assembly** of planned parts, each modelled right on its own and checked against the pictures
+   ([docs/ASSEMBLY.md](docs/ASSEMBLY.md)); everything else, and `build_mode: "single"`, goes on as below.
 2. **3D seed.** Tripo H3.1 with detailed geometry and HD textures by default; Meshy v7 and Hitem3D are wired in as
    alternatives (`MASTERSMITH_SEED_MODEL`). Hitem3D v3 comes in two flavours at the same price: one picture
    (`hitem3d3`) or every approved angle in its named front / left / back / right slots (`hitem3d3mv`). The vendor mesh is the asset; nothing sculpts it afterwards.
 3. **Blender finish** (headless, free) in two passes around a decision step:
    - *prepare*: join, long axis to +X (or +Z up for characters), scale to real metres, origin, probe renders;
-   - *decide*: the vision model says which probe shows the front; SAM 3 returns masks for glass, wheels and
-     small parts from text prompts;
+   - *decide*: the vision model says which probe shows the front; SAM 3 returns masks for glass and wheels from
+     text prompts;
    - *finish*: masks are projected onto faces. Painted glass gets the `MI_<Name>_Glass` slot; an empty window
-     frame gets a pane built into it; aircraft get a cockpit under the canopy. Then roughness sanity,
+     frame gets a pane built into it. Then roughness sanity, a high-poly normal/AO bake,
      `T_<Name>_BC/N/ORM.png`, LOD0/1/2, `UCX_` convex hull, previews, `SM_<Name>.fbx` (+LOD FBXs), `.glb`, `.blend`.
 4. **Rig** when asked (default for characters): Meshy auto-rig with walk and run clips for humanoids; wheel bones
    for vehicles via a Hunyuan part split; Muzzle/Grip/Sight sockets for weapons.
@@ -149,7 +137,7 @@ own when Docker restarts after a reboot; stopped ones stay stopped until you sta
 The director (a cheap OpenRouter model) only talks and fills in the brief; it never writes Blender code and never
 sees images. Why this shape: a bake-off showed that the reference picture is where realism comes from, that
 decimating the vendor mesh in Blender is visually lossless, and that retopology and retexture vendors made things
-worse. So the pipeline spends on the picture and the seed and does the rest itself.
+worse; later, that every repair on a finished mesh cost more than building it right (2026-09-26). So the pipeline spends on the picture and the seed and does the rest itself.
 
 ## Money
 
@@ -203,9 +191,10 @@ mastersmith/wallet.py      SQLite spend ledger: what your keys spent, job by job
 mastersmith/spec.py        the brief
 mastersmith/brief.py       words in the brief that decide the category
 mastersmith/skills/*.md    per-category guidance with front matter the pipeline reads
-mastersmith/stages/        reference, seed, probe (facing + masks), finish (runs Blender), rig, review, gate, package
-mastersmith/blender/       headless Blender scripts: prepare, finish, rig, repaint, reproject, blend_to_seed
-mastersmith/pipeline.py    build() from a brief; rework() on an existing mesh (import / refinish / retexture)
+mastersmith/stages/        reference, plan + assembly (parts), seed, probe (facing + masks), finish (runs Blender),
+                           rig, review, gate, package
+mastersmith/blender/       headless Blender scripts: prepare, finish, build_part + assemble (parts), rig, blend_to_seed
+mastersmith/pipeline.py    build() from a brief; rework() on an existing mesh (import / refinish)
 mastersmith/agent.py       the director (chat + tools)
 mastersmith/service.py     FastAPI: chat, uploads, jobs, files, wallet
 mastersmith/worker.py      the build queue
@@ -217,10 +206,8 @@ tests/                     pure tests; a Blender test behind MASTERSMITH_BLENDER
 ## Adding a skill or a vendor
 
 A skill is a Markdown file in `mastersmith/skills/` with `reference_view`, `second_view`, `mirror_as_third_view`,
-`forward_axis` (long|up), `origin` (bottom|center) in the front matter, plus optional `glass_prompt`,
-`rig_parts_prompt`, `material_families`, `repair_cylinders` and `part_seeds` lists the probe turns into SAM masks.
-Part seeds run on hero budgets (150k+ triangles) or when the brief sets `part_seeds`, never on `premium` alone, and
-only for a part the brief allows and the reference shows; each takes a slice of the triangle budget like an added part.
+`forward_axis` (long|up), `origin` (bottom|center) in the front matter, plus optional `glass_prompt` and
+`rig_parts_prompt`, the phrases the probe turns into SAM masks.
 A new fal endpoint needs a row in `pricing.FAL_PRICES` and a call site in a stage; nothing else.
 
 ## License

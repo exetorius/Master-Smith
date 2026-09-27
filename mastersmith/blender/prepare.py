@@ -76,81 +76,6 @@ raw_tris = blib.tri_count(ob)
 log("imported %d triangles in %d part(s)" % (raw_tris, len(meshes)))
 
 
-def image_feeding(sock):
-    if not sock.is_linked:
-        return None
-    node = sock.links[0].from_node
-    for _ in range(4):
-        if node.type == "TEX_IMAGE":
-            return node
-        if not node.inputs or not any(i.is_linked for i in node.inputs):
-            return None
-        node = next(i for i in node.inputs if i.is_linked).links[0].from_node
-    return None
-
-
-def save_image(img, path):
-    img.filepath_raw = path
-    img.file_format = "PNG"
-    img.save()
-
-
-retex = args.get("retexture_maps") or {}
-if retex.get("BC"):
-    # a repaint: the vendor painted our atlas, so its maps drop straight onto the same UVs
-    kept = {}
-    for slot in ob.material_slots:
-        m = slot.material
-        if not m or not m.node_tree:
-            continue
-        nt = m.node_tree
-        bsdf = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
-        if not bsdf:
-            continue
-        if args.get("keep_old_maps"):
-            for role, sock in (("BC", bsdf.inputs["Base Color"]), ("R", bsdf.inputs["Roughness"]),
-                               ("M", bsdf.inputs["Metallic"]), ("N", bsdf.inputs["Normal"])):
-                node = image_feeding(sock)
-                if node is not None and node.image and role not in kept:
-                    path = os.path.join(args["work_dir"], "old_%s.png" % role)
-                    save_image(node.image, path)
-                    kept[role] = {"file": path, "channel": (sock.links[0].from_socket.name if sock.links[0].from_node.type == "SEPARATE_COLOR" else None)}
-        for role, sock, cs in (("BC", bsdf.inputs["Base Color"], "sRGB"), ("R", bsdf.inputs["Roughness"], "Non-Color"),
-                               ("M", bsdf.inputs["Metallic"], "Non-Color")):
-            if not retex.get(role):
-                continue
-            img = bpy.data.images.load(os.path.abspath(retex[role]))
-            img.colorspace_settings.name = cs
-            img.pack()
-            node = nt.nodes.new("ShaderNodeTexImage")
-            node.image = img
-            for l in list(sock.links):
-                nt.links.remove(l)
-            nt.links.new(node.outputs["Color"], sock)
-        if retex.get("N"):
-            img = bpy.data.images.load(os.path.abspath(retex["N"]))
-            img.colorspace_settings.name = "Non-Color"
-            img.pack()
-            tex = nt.nodes.new("ShaderNodeTexImage")
-            tex.image = img
-            nm = next((n for n in nt.nodes if n.type == "NORMAL_MAP"), None) or nt.nodes.new("ShaderNodeNormalMap")
-            for l in list(nm.inputs["Color"].links):
-                nt.links.remove(l)
-            nt.links.new(tex.outputs["Color"], nm.inputs["Color"])
-            if not bsdf.inputs["Normal"].is_linked:
-                nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
-    # the old image nodes now feed nothing; the glTF exporter warns about them and picks one at random
-    for slot in ob.material_slots:
-        m = slot.material
-        if not m or not m.node_tree:
-            continue
-        for n in list(m.node_tree.nodes):
-            if n.type == "TEX_IMAGE" and not any(o.is_linked for o in n.outputs):
-                m.node_tree.nodes.remove(n)
-    log("retexture maps wired in: %s%s" % (", ".join(sorted(k for k in retex if retex[k])),
-                                          ("; old maps kept: " + ", ".join(sorted(kept))) if kept else ""))
-    json.dump(kept, open(os.path.join(args["work_dir"], "old_maps.json"), "w"))
-
 # --- orient: longest horizontal axis -> X (or keep Z up for characters), scale, origin
 lo, hi = blib.dims(ob)
 ext = hi - lo
@@ -160,7 +85,7 @@ if args["forward_axis"] == "long" and ext.y > ext.x * 1.15:
 lo, hi = blib.dims(ob)
 ext = hi - lo
 if args["forward_axis"] == "long" and ext.z > max(ext.x, ext.y) * 1.15 and not args.get("keep_upright"):   # a stick stays a stick
-    # a sword or rifle that arrived standing up (hybrid Longsword, 2026-09-18) lies along X like every other weapon
+    # a sword or rifle that arrived standing up (a Longsword, 2026-09-18) lies along X like every other weapon
     import math as _math
     ob.rotation_mode = "XYZ"
     ob.rotation_euler = (0.0, _math.radians(90.0), 0.0)

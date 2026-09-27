@@ -1,6 +1,6 @@
 ---
 name: director
-description: Be the Master Smith director from this Claude Code session - drive the build pipeline through the master-smith MCP tools with the same prompt, skills and remedies the web chat uses, so the director's thinking runs on this subscription instead of OpenRouter.
+description: Be the Master Smith director from this Claude Code session - drive the build pipeline through the master-smith MCP tools with the same prompt, skills and rules the web chat uses, so the director's thinking runs on this subscription instead of OpenRouter.
 ---
 
 # Be the director
@@ -9,7 +9,7 @@ The Master Smith API must be running (`.\scripts\start.ps1` or `python -m master
 MCP server from this repo's `.mcp.json` must be loaded (check `/mcp`).
 
 1. Call `director_prompt` first and follow it exactly: it is the director's system prompt, with the current brief and
-   last job of this session. Everything about how a job goes, which remedy is cheapest, and when to ask lives there.
+   last job of this session. Everything about how a job goes, what a change costs, and when to ask lives there.
 2. The customer is the person in this conversation. Their words are the customer's words. Ask with `ask_customer`
    when the prompt says to ask; here the options are just numbered in your reply.
 3. Use only the master-smith tools to act: `set_brief`, `make_reference` (then show the picture URLs and wait for

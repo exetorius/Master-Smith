@@ -52,8 +52,8 @@ export type TurnData = {
   last_job: string | null;
   balance: number;
   providers: Providers | null;
-  pictures: { label: string; url: string }[];   // pictures shown this turn: reference angles, or a removal preview
-  pictures_kind: "reference" | "removal" | null;
+  pictures: { label: string; url: string }[];   // pictures shown this turn: the reference angles to approve
+  pictures_kind: "reference" | null;
   question: { question: string; options: string[] } | null;   // the director asked; options render as numbered buttons
   reference_job: string | null;   // the approved reference job the next build will seed from
   chat_cost_usd: number;
@@ -108,6 +108,6 @@ export type JobView = {
   };
   files: string[];
   previews: string[];
-  pictures: string[];           // reference views, cockpit/part pictures, removal previews the job drew (downloadable)
+  pictures: string[];           // reference views and customer pictures of the job (downloadable)
   glb: string | null;
 };
