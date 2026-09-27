@@ -21,35 +21,38 @@ Picture 1 is the SIDE view, cropped exactly to the object: the forward end (muzz
 Picture 2 is the FRONT view (looking back at the forward end), cropped exactly to the object: the object's left is on
 the right of the picture. Both carry a grid in percent: 0 at the left / top edge, 100 at the right / bottom edge.
 
-Split the object into the parts an artist would model separately (between 4 and {max_parts}): the main moulded
-body, and every piece that is its own shape - barrel, muzzle device, rail, each sight, magazine, pistol grip, trigger,
-trigger guard, handguard, stock, cheek rest, charging handle, panels, pins that matter at game distance. No decals,
-no text, no screws smaller than 1% of the length.
+Split the object into a vendor body and the few parts that code builds better (between 2 and {max_parts} parts). No
+decals, no text, no screws smaller than 1% of the length.
 
 Keep together what is ONE moulding or casting in reality: a polymer pistol frame WITH its grip and trigger guard,
 a rifle stock with its pistol grip, a vehicle's one-piece body shell. A cut through the middle of one moulding
 becomes a visible seam or gap when the halves are built apart.
 
-For each part choose how it is built. The two methods have opposite strengths, so split the work by them:
-- "vendor": an AI image-to-3D model of that part alone. Right shape and surface on sculpted, moulded bodies; soft on
-  thin, sharp or repeated detail. Use it for the MAIN BODY - the moulded housing, receiver, stock, a pistol frame with
-  its grip and guard, a vehicle's body shell - as ONE part drawn without its attached mechanical parts. In its "what",
-  say what it is and list the parts it is drawn WITHOUT ("the moulded receiver and stock, without the barrel, rail,
-  sights, magazine and charging handle").
-- "code": modelled in code with a hard-surface kit (boxes, cylinders, tubes, outlines, lofts, bends, rounded and
-  subdivided shapes, exact cuts and repeats). Exact edges; weak on free-form sculpted surfaces. Use it for the
-  mechanical parts: barrels, muzzle devices, rails, sights, triggers, levers, pins, magazines, wheels, bumpers, flat
-  or faceted panels, vents and slotted handguards.
-A typical weapon is one vendor body and 6-15 code parts; a typical vehicle one vendor body shell and code wheels,
-bumpers, lights, mirrors and racks. Never model the main body in code as slabs; never send a barrel or a rail to the
-vendor.
+For each part choose how it is built. The vendor models almost everything; code only what it makes perfectly:
+- "code" ONLY for these, and only when they are clearly visible:
+  * turned (lathe) parts, round in cross-section: barrels, muzzle brakes, flash hiders, suppressors, gas blocks,
+    round knobs and bolt handles, exhaust tips, round lenses' housings, wheel hubs
+  * repeated machined parts: Picatinny / M-LOK rails, rail covers with regular slots, cooling-fin stacks
+  * small hardware: exposed pins, screw heads and rivets that matter at game distance
+  Code parts are modelled in code from primitives; everything irregular, moulded, curved or busy with small features
+  comes out better from the vendor.
+- "vendor": an AI image-to-3D model. EVERYTHING else is ONE vendor part, the body: the housing or receiver, stock,
+  grip, trigger and guard, handguard with its vents, sights, magazine, levers, cheek rest, slide, panels - drawn as the
+  whole object WITHOUT the code parts. In its "what", describe it and list the parts it is drawn WITHOUT ("the
+  bullpup body with its sights, magazine and handguard, without the barrel, muzzle brake and rails"). Give it the
+  colour of its largest area; if it shows clearly different colours (an olive panel on a grey body), set
+  "keep_texture": true in its material so the vendor's own colours are kept.
+  A second vendor part only for a large separate piece of a different material that would confuse one picture
+  (a vehicle's tyres, a sling).
+A typical weapon: one vendor body plus a barrel, a muzzle device and a rail or two in code. A typical vehicle: one
+vendor body plus code wheel hubs and exhaust tips.
 
 Answer JSON only:
 {{"parts": [{{"name": "PascalCase unique", "what": "one sentence: shape, features to model, colour and finish",
   "method": "code" | "vendor",
   "side_box": [x_left, x_right, z_top, z_bottom],    percent of picture 1, tight around the part as seen from the side
   "front_span": [y_left, y_right],                   percent of picture 2 across, tight around the part as seen from the front
-  "material": {{"color": "#rrggbb as the camera sees it", "metal": true/false, "roughness": 0.0-1.0, "glass": false}}}}],
+  "material": {{"color": "#rrggbb as the camera sees it", "metal": true/false, "roughness": 0.0-1.0, "glass": false, "keep_texture": false}}}}],
  (metal is true ONLY for bare metal - blued or parkerised steel, anodised aluminium, chrome. Anything painted, coated
  or plastic is metal false, even on a steel body: a painted truck panel is not metal.)
  "notes": "anything the assembly must respect"}}
@@ -197,7 +200,7 @@ def validate_plan(raw, dims, max_parts=None):
                       "side_box": [pct(v) for v in p["side_box"]], "front_span": [pct(v) for v in p["front_span"]],
                       "box_min": box_min, "box_max": box_max,
                       "material": {"color": colour, "metal": bool(mat.get("metal")), "roughness": round(rough, 3),
-                                   "glass": bool(mat.get("glass"))}})
+                                   "glass": bool(mat.get("glass")), "keep_texture": bool(mat.get("keep_texture"))}})
     if len(parts) > max_parts:
         dropped += [{"name": p["name"], "reason": "over the %d-part limit" % max_parts} for p in parts[max_parts:]]
         parts = parts[:max_parts]

@@ -302,7 +302,9 @@ for p in args["parts"]:
     if p["kind"] == "code" and args.get("detail") and not (p.get("material") or {}).get("glass"):
         rec["reference_detail"] = add_reference_detail(o, args["detail"])
     if p["kind"] == "vendor" and not (p.get("material") or {}).get("glass") and args.get("tint_vendor", True):
-        rec["tinted"] = tint_to_plan(o, (p.get("material") or {}).get("color"))
+        # a multi-coloured body (grey with an olive panel) keeps the vendor's colours; its surface is still the plan's
+        if not (p.get("material") or {}).get("keep_texture"):
+            rec["tinted"] = tint_to_plan(o, (p.get("material") or {}).get("color"))
         rec["surface_planned"] = surface_to_plan(o, p.get("material") or {})
     for slot in o.material_slots:
         if slot.material:
