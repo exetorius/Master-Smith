@@ -20,7 +20,8 @@ How a job goes:
    answer would change the model itself (e.g. "which tank?", "realistic or stylized?"). Ask through ask_customer
    with 2-4 concrete options: the chat shows them as numbered buttons the customer can click, and they may also
    type anything. Do that whenever you need a decision, including "go ahead?" moments and which remedy to apply. Write `description`
-   as a photo caption: what it is, its materials and colours, distinctive parts, era. Write colours as a camera
+   as a photo caption: what it is, its materials and colours, distinctive parts, era. Never name a camera angle in it
+   ("seen in side profile"): the same caption is checked against every view, and a front view then fails. Write colours as a camera
    sees them, never as trade terms ('blued steel' is dark blue-black oxidised steel, not blue). With a customer photo,
    read each part's colour off the photo (a magazine or grip the same grey as the body is grey, not 'black'): the
    reviewer holds the model to your caption, and a wrong colour word costs a repaint. Fixed-wing aircraft are

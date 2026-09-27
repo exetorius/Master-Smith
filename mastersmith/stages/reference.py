@@ -46,6 +46,8 @@ def edit_prompt(spec, skill, view=None, fixes=""):
 CHECK_PROMPT = """You are checking a reference picture that a 3D modeller will build a mesh from.
 The brief: {brief}
 Wanted view: {view}
+Judge the camera angle ONLY against the wanted view. The brief describes the object; any viewpoint words in it
+("side profile", "three-quarter") describe another picture and are not a reason to fail this one.
 Answer with JSON only:
 {{"single_object": true/false, "plain_background": true/false, "whole_object_visible": true/false,
  "view_matches": true/false, "matches_brief": true/false, "score": 1-10, "fixes": "one sentence of prompt changes if score < 7, else empty"}}"""
@@ -235,15 +237,22 @@ def make_reference(job, skill):
         # object stays the same object. It is checked like the first; a failed one is simply not used.
         job.log("  extra view: %s" % skill["meta"]["second_view"])
         ok2, second = False, os.path.join(job.dir, "ref_view2.png")
-        if not getattr(job, "edit_refused", False):
+        fixes2 = ""
+        for attempt2 in range(2):        # an assembly cannot be planned without it: one retry with the checker's fixes
+            if getattr(job, "edit_refused", False):
+                break
             try:
-                job.images.generate("Show this exact same object %s. Same object, same colours and materials, same lighting, plain "
-                                    "pure white background, sharp focus." % skill["meta"]["second_view"],
+                job.images.generate(("Show this exact same object %s. Same object, same colours and materials, same lighting, plain "
+                                     "pure white background, sharp focus. %s" % (skill["meta"]["second_view"], fixes2)).strip(),
                                     second, model=pricing.edit_model(spec), references=[primary], aspect_ratio="1:1")
                 ok2, j2 = _check(job, second, skill["meta"]["second_view"])
                 checks.append(j2)
             except ImageRefused:
                 job.log("  the picture editor refused the extra view; seeding from one picture")
+                break
+            if ok2:
+                break
+            fixes2 = str(j2.get("fixes") or "")
         if ok2:
             views.append(second)
             pictures.append({"label": skill["meta"]["second_view"], "path": second})

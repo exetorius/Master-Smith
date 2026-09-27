@@ -191,6 +191,9 @@ def build(spec, user, wallet, log=print, job_id=None):
         if assembly_wanted(spec):
             log("2/4 assembly: plan the parts, build each one, assemble")
             assembled = build_assembly(job, spec, ref)
+            if assembled is None and spec.build_mode == "assembly":
+                raise RuntimeError("an assembly needs a side and a front picture and the front view was not accepted; "
+                                   "draw the pictures again (make_reference) or build_mode single")
             if assembled is None:
                 log("  the approved pictures have no side and front view; building from one seed instead")
         if assembled is not None:
