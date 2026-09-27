@@ -11,6 +11,7 @@ from . import config, pricing, providers, skills
 from .fal import Fal, FalError
 from .images import Images
 from .llm import LLM
+from .netsafe import download_public
 from .diagnose import diagnose
 from .stages.finish import run_finish
 from .stages.gate import check as gate_check
@@ -45,7 +46,7 @@ class Job:
             ext = os.path.splitext(src.split("?")[0])[1][:5] or ".png"
             local = os.path.join(self.dir, "customer_ref_%d%s" % (i, ext))
             if src.startswith(("http://", "https://")):
-                self.fal.download(src, local)
+                download_public(src, local)
             else:
                 if not os.path.exists(src):
                     raise FileNotFoundError("reference image not found: %s" % src)
@@ -67,7 +68,7 @@ class Job:
             ext = os.path.splitext(src.split("?")[0])[1][:5] or ".png"
             local = os.path.join(self.dir, "customer_ref_%d%s" % (i, ext))
             if src.startswith(("http://", "https://")):
-                self.fal.download(src, local)
+                download_public(src, local)
             else:
                 if not os.path.exists(src):
                     raise FileNotFoundError("reference image not found: %s" % src)
@@ -241,7 +242,7 @@ def blend_to_seed(blend_path, work_dir, log=print):
     glb = os.path.join(work_dir, "blend_seed.glb")
     info = os.path.join(work_dir, "blend_seed.json")
     script = str(config.ROOT / "mastersmith" / "blender" / "blend_to_seed.py")
-    proc = subprocess.run([config.BLENDER_BIN, "-b", "--python", script, "--", blend_path, glb, info],
+    proc = subprocess.run([config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", script, "--", blend_path, glb, info],
                           capture_output=True, text=True, timeout=1200)
     if proc.returncode != 0 or not os.path.exists(glb):
         raise RuntimeError("blend_to_seed failed: %s" % ((proc.stdout or "")[-600:] + (proc.stderr or "")[-300:]))

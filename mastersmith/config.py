@@ -30,11 +30,20 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 DB_PATH = DATA_DIR / "mastersmith.db"
 
 BLENDER_BIN = os.environ.get("BLENDER_BIN", r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe")
+# Every Blender run: headless, and never the scripts a .blend carries (-Y), whatever the user's "Auto Run Python
+# Scripts" preference says - customers hand us .blend files.
+BLENDER_FLAGS = ["-b", "-Y"]
 
 # A fixed API key for scripts and agents, straight from .env: any string you make up. Requests then carry it as a
 # bearer token or X-API-Key. With no key configured, every request is the local user: this is one person's tool.
 API_KEY = os.environ.get("MASTERSMITH_API_KEY", "").strip()
 API_USER = os.environ.get("MASTERSMITH_API_USER", "agent").strip() or "agent"
+# The key older copies of .env.example shipped: known to everyone, so the service refuses to start with it.
+PLACEHOLDER_API_KEY = "ms_dev_change_me"
+# Browser origins that may call the API directly. The chat's own requests go through its Next.js server, so this only
+# matters for a page you build yourself; any other website open in your browser is refused.
+CORS_ORIGINS = [o.strip() for o in os.environ.get(
+    "MASTERSMITH_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
 
 # --- LLMs (OpenRouter ids). The director runs the chat and decides; it is cheap on purpose.
 DIRECTOR_MODEL = os.environ.get("MASTERSMITH_DIRECTOR_MODEL", "google/gemini-3.8-flash")

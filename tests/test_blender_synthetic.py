@@ -44,7 +44,7 @@ print("MADE", out)
 
 
 def blender(script_path, args_path):
-    r = subprocess.run([config.BLENDER_BIN, "-b", "--python", script_path, "--", args_path], capture_output=True, text=True, timeout=900)
+    r = subprocess.run([config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", script_path, "--", args_path], capture_output=True, text=True, timeout=900)
     assert r.returncode == 0, (r.stdout[-2000:], r.stderr[-1500:])
     return r.stdout
 
