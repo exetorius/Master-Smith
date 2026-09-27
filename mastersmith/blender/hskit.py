@@ -99,7 +99,8 @@ class Kit:
         return self._bevel(self._link(bm, name), bevel, min(s))
 
     def cylinder(self, center=(0, 0, 0), radius=None, length=None, axis="X", sides=32, radius2=None, bevel=None,
-                 name="cylinder"):
+                 name="cylinder", height=None, depth=None):
+        length = length if length is not None else (height if height is not None else depth)   # the builder's other words
         a = _axis(axis)
         c = _vec3(center, "center")
         r1 = float(radius if radius is not None else min(self.W, self.H) / 2)
@@ -116,7 +117,9 @@ class Kit:
         bmesh.ops.translate(bm, vec=c, verts=bm.verts)
         return self._bevel(self._link(bm, name), bevel, min(2 * max(r1, r2), ln))
 
-    def tube(self, center=(0, 0, 0), r_outer=None, r_inner=None, length=None, axis="X", sides=32, bevel=None, name="tube"):
+    def tube(self, center=(0, 0, 0), r_outer=None, r_inner=None, length=None, axis="X", sides=32, bevel=None, name="tube",
+             height=None, depth=None):
+        length = length if length is not None else (height if height is not None else depth)
         r_outer = float(r_outer if r_outer is not None else min(self.W, self.H) / 2)
         r_inner = float(r_inner if r_inner is not None else r_outer * 0.6)
         if not 0 < r_inner < r_outer:
