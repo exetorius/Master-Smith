@@ -173,6 +173,95 @@ def add_reference_detail(o, det):
     return True
 
 
+def planned_linear(h):
+    """The plan's colour (#rrggbb) in linear RGB with the same albedo floor the code parts use (sRGB 45)."""
+    h = str(h or "").lstrip("#")
+    if len(h) != 6:
+        return None
+    out = []
+    for i in (0, 2, 4):
+        c = max(int(h[i:i + 2], 16) / 255.0, 45 / 255.0)
+        out.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+    return tuple(out)
+
+
+def image_mean_luminance(img):
+    """Mean linear luminance of an image's opaque texels, on a subsample."""
+    w, h = img.size
+    if not w or not h:
+        return None
+    a = np.empty(w * h * 4, np.float32)
+    img.pixels.foreach_get(a)
+    a = a.reshape(-1, 4)[:: max(1, (w * h) // 65536)]
+    a = a[a[:, 3] > 0.5] if (a[:, 3] > 0.5).any() else a
+    if img.colorspace_settings.name == "sRGB":
+        rgb = np.where(a[:, :3] <= 0.04045, a[:, :3] / 12.92, ((a[:, :3] + 0.055) / 1.055) ** 2.4)
+    else:
+        rgb = a[:, :3]
+    return float((rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)).mean())
+
+
+def tint_to_plan(o, colour):
+    """A vendor part takes its planned colour, keeping its own light and dark variation: base colour = planned colour x
+    (texel luminance / the texture's mean luminance), clamped. Tripo keeps a washed-out grey where the plan says matte
+    black (the pistol frame, 2026-09-27); this is the part's material being set as planned while it is assembled, the
+    shape and the texture's detail are the vendor's."""
+    lin = planned_linear(colour)
+    if lin is None:
+        return False
+    done = False
+    for m in {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}:
+        t = m.node_tree
+        b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if b is None:
+            continue
+        base = b.inputs["Base Color"]
+        rgb = t.nodes.new("ShaderNodeRGB")
+        rgb.outputs[0].default_value = (*lin, 1.0)
+        if not base.is_linked:
+            t.links.new(rgb.outputs[0], base)
+            done = True
+            continue
+        src = base.links[0].from_socket
+        img, todo, seen = None, [src.node], set()
+        while todo and img is None:                        # the image upstream of the base colour
+            n = todo.pop()
+            if n.name in seen:
+                continue
+            seen.add(n.name)
+            if n.type == "TEX_IMAGE" and n.image:
+                img = n.image
+            todo.extend(l.from_node for i in n.inputs for l in i.links)
+        mean = image_mean_luminance(img) if img is not None else None
+        if not mean or mean <= 1e-4:
+            continue
+        bw = t.nodes.new("ShaderNodeRGBToBW")
+        t.links.new(src, bw.inputs[0])
+        ratio = t.nodes.new("ShaderNodeMath")
+        ratio.operation = "DIVIDE"
+        t.links.new(bw.outputs[0], ratio.inputs[0])
+        ratio.inputs[1].default_value = mean
+        clamp = t.nodes.new("ShaderNodeMapRange")          # keep the detail, not the vendor's blown highlights
+        clamp.clamp = True
+        clamp.inputs["From Min"].default_value = 0.0
+        clamp.inputs["From Max"].default_value = 2.0
+        clamp.inputs["To Min"].default_value = 0.0
+        clamp.inputs["To Max"].default_value = 2.0
+        t.links.new(ratio.outputs[0], clamp.inputs["Value"])
+        soft = t.nodes.new("ShaderNodeMath")               # halve the swing: 0.5 + 0.5 x ratio, 0.5..1.5
+        soft.operation = "MULTIPLY_ADD"
+        t.links.new(clamp.outputs["Result"], soft.inputs[0])
+        soft.inputs[1].default_value = 0.5
+        soft.inputs[2].default_value = 0.5
+        scale = t.nodes.new("ShaderNodeVectorMath")
+        scale.operation = "SCALE"
+        t.links.new(rgb.outputs[0], scale.inputs[0])
+        t.links.new(soft.outputs[0], scale.inputs["Scale"])
+        t.links.new(scale.outputs["Vector"], base)
+        done = True
+    return done
+
+
 # ---------------------------------------------------------------- parts in their boxes
 bpy.ops.wm.read_factory_settings(use_empty=True)
 parts, glass_parts = [], []
@@ -182,6 +271,8 @@ for p in args["parts"]:
     # code parts carry the reference's fine detail; vendor parts already have their own texture
     if p["kind"] == "code" and args.get("detail") and not (p.get("material") or {}).get("glass"):
         rec["reference_detail"] = add_reference_detail(o, args["detail"])
+    if p["kind"] == "vendor" and not (p.get("material") or {}).get("glass") and args.get("tint_vendor", True):
+        rec["tinted"] = tint_to_plan(o, (p.get("material") or {}).get("color"))
     for slot in o.material_slots:
         if slot.material:
             slot.material.name = "MS_src_%s_%s" % (p["name"], slot.material.name)
