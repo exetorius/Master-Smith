@@ -26,6 +26,10 @@ body, and every piece that is its own shape - barrel, muzzle device, rail, each 
 trigger guard, handguard, stock, cheek rest, charging handle, panels, pins that matter at game distance. No decals,
 no text, no screws smaller than 1% of the length.
 
+Keep together what is ONE moulding or casting in reality: a polymer pistol frame WITH its grip and trigger guard,
+a rifle stock with its pistol grip, a vehicle's one-piece body shell. A cut through the middle of one moulding
+becomes a visible seam or gap when the halves are built apart.
+
 For each part choose how it is built:
 - "code": built from boxes, cylinders, tubes and straight-extruded outlines with holes, slots and repeats. Barrels,
   muzzle brakes, rails, sight blades, triggers, trigger guards, magazines, flat or faceted panels, handguards with cut

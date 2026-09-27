@@ -291,9 +291,11 @@ def build_vendor_part(job, spec, part, plan):
     picture, fixes = None, ""
     for attempt in range(2):
         path = os.path.join(out_dir, "picture_%d.png" % attempt)
+        # the SAME side view as the reference (forward to the right): its silhouette is what the seed is registered to
         job.images.generate("Show ONLY %s from this exact object, whole and complete, exactly as it looks here (same shape, "
-                            "colours and materials), seen from a three-quarter view, isolated on a plain pure white "
-                            "background, nothing else in frame, sharp product photograph. %s" % (part["what"], fixes),
+                            "colours and materials), seen from exactly the same side angle as this picture with the forward "
+                            "end to the right, isolated on a plain pure white background, nothing else in frame, sharp product "
+                            "photograph. %s" % (part["what"], fixes),
                             path, model=pricing.edit_model(spec), references=[ref], aspect_ratio="1:1")
         j = extract_json(job.llm.vision(PART_CHECK.format(part=part["what"]), [path])) or {}
         if j.get("ok") and int(j.get("score", 0) or 0) >= 6:
@@ -317,11 +319,41 @@ def build_vendor_part(job, spec, part, plan):
     ext = ".fbx" if mesh_url.split("?")[0].lower().endswith(".fbx") else ".glb"
     glb = os.path.join(out_dir, "seed" + ext)
     job.fal.download(mesh_url, glb)
+    registered = _register(job, name, glb, picture, out_dir) if ext == ".glb" else None
+    if registered:
+        job.log("  part %s: seeded by %s, registered to its side picture (IoU %.2f, runner-up %.2f)" % (
+            name, model.split("/")[0], registered["iou"], registered["runner_up_iou"]))
+        return {"blend": registered["blend"], "yaw": 0, "picture": picture, "seed": glb, "registration": registered}
     oriented = orient_part(job, spec, {"name": name, "phrase": part["what"], "size_m": max(_size(part))}, glb)
     if not oriented:
         return None
     job.log("  part %s: seeded by %s, facing yaw %s" % (name, model.split("/")[0], oriented.get("yaw")))
     return {"blend": oriented["blend"], "yaw": oriented.get("yaw", 0), "picture": picture, "seed": glb}
+
+
+def _register(job, name, glb, picture, out_dir):
+    """The seed turned so its side silhouette matches the part's side picture (blender/register_part.py). -> result or None."""
+    try:
+        import numpy as np
+        a = np.asarray(Image.open(picture).convert("RGB")).astype(np.float32) / 255.0
+        border = np.concatenate([a[:6].reshape(-1, 3), a[-6:].reshape(-1, 3), a[:, :6].reshape(-1, 3), a[:, -6:].reshape(-1, 3)])
+        fg = np.abs(a - np.median(border, axis=0)).max(axis=2) > 0.1
+        if fg.mean() < 0.01:
+            return None
+        mask = os.path.join(out_dir, "side_mask.png")
+        Image.fromarray((fg * 255).astype("uint8")).save(mask)
+        res_path = os.path.join(out_dir, "registration.json")
+        blend = os.path.join(out_dir, "registered.blend")
+        _blender(job, "register_part.py", {"glb": glb, "mask": mask, "out_blend": blend, "out_json": res_path},
+                 "register_%s" % name, timeout=600)
+        res = json.load(open(res_path))
+        if res.get("iou", 0) < 0.35:
+            job.log("  part %s: registration too weak (IoU %.2f); asking which side is the front instead" % (name, res.get("iou", 0)))
+            return None
+        return {**res, "blend": blend}
+    except Exception as exc:  # noqa: BLE001 - the facing question is the fallback
+        job.log("  part %s: registration failed (%s); asking which side is the front instead" % (name, str(exc)[:120]))
+        return None
 
 
 def _assemble(job, spec, plan, built, round_no, reference):
