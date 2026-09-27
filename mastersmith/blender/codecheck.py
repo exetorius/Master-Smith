@@ -6,10 +6,10 @@ dunder or private attributes, no while loops, no exec. Blender runs the same che
 import ast
 
 SAFE_BUILTINS = ("range", "len", "min", "max", "abs", "float", "int", "round", "sum", "enumerate", "zip", "list",
-                 "tuple", "reversed", "sorted", "any", "all", "bool")
+                 "tuple", "reversed", "sorted", "any", "all", "bool", "hasattr", "dict", "set")
 MODULES = ("kit", "math")
 PARAMS = ("L", "W", "H")
-LIST_METHODS = ("append", "extend", "insert", "pop", "index", "count")
+LIST_METHODS = ("append", "extend", "insert", "pop", "index", "count", "sort", "reverse", "copy", "items", "keys", "values", "get")
 ALLOWED_NODES = (
     ast.Module, ast.FunctionDef, ast.arguments, ast.arg, ast.Return, ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Expr,
     ast.Call, ast.keyword, ast.Name, ast.Load, ast.Store, ast.Attribute, ast.Constant, ast.Tuple, ast.List, ast.Dict,

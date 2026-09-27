@@ -193,7 +193,7 @@ class Kit:
     def cut(self, target, *cutters):
         """Boolean difference, one cutter at a time. Cutters may be pieces joined together even when they overlap
         (exact solver with self-intersection on). A cut that empties the target or shrinks its bounds to under half
-        is undone and reported: a cutter that swallows the part is a mistake, not a design (the bullpup handguard's
+        (to under a quarter) is undone and reported: a cutter that swallows the part is a mistake, not a design (the bullpup handguard's
         joined slot cutters erased the whole shroud, 2026-09-27)."""
         self._check(target)
         for k, c in enumerate(cutters):
@@ -212,7 +212,7 @@ class Kit:
             self.made.remove(c)
             bpy.data.objects.remove(c, do_unlink=True)
             vol1, f1 = self._extent(target)
-            if f1 == 0 or (vol0 > 0 and vol1 < vol0 * 0.5):
+            if f1 == 0 or (vol0 > 0 and vol1 < vol0 * 0.25):     # halving a cylinder is a design; erasing it is not
                 broken = target.data
                 target.data = before_mesh
                 bpy.data.meshes.remove(broken)
