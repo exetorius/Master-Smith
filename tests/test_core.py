@@ -78,9 +78,14 @@ def test_weapon_glass_follows_the_caption():
     assert Spec(name="R", description="a sedan", category="vehicle").glass is True
 
 
-def test_hard_surfaces_build_from_parts_unless_the_brief_says_single():
+def test_assembly_is_opt_in_unless_the_default_is_switched_on(monkeypatch):
     from mastersmith.spec import assembly_wanted
-    w = Spec(name="B", description="a bullpup carbine, no scope", category="weapon")
+    plain = Spec(name="B", description="a bullpup carbine, no scope", category="weapon")
+    assert not assembly_wanted(plain) and pricing.estimate(plain)["build_mode"] == "single"
+    monkeypatch.setattr(config, "ASSEMBLY_DEFAULT", True)
+    assert assembly_wanted(plain)
+    monkeypatch.setattr(config, "ASSEMBLY_DEFAULT", False)
+    w = Spec(name="B", description="a bullpup carbine, no scope", category="weapon", build_mode="assembly")
     assert assembly_wanted(w) and pricing.estimate(w)["build_mode"] == "assembly"
     names = [n for n, _ in pricing.estimate(w)["steps"]]
     assert any(n.startswith("parts plan") for n in names) and not any(n.startswith("3D seed") for n in names)

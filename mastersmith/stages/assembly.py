@@ -207,6 +207,7 @@ def build_code_part(job, spec, part, plan):
     dims = plan.get("dims_m") or [L, W, H]
     big = L > 0.25 * dims[0] or H > 0.35 * dims[2]           # a housing or stock carries the look: think harder
     effort = "high" if big else "medium"
+    model = config.BUILDER_MODEL if big else config.BUILDER_MODEL_SMALL      # pins and levers do not need the big one
     prompt = CODE_PROMPT.format(category=spec.category, description=spec.description[:600], name=name, what=part["what"],
                                 L_mm=L * 1000, W_mm=W * 1000, H_mm=H * 1000, kit=codecheck.KIT_DOC)
     joins = contacts(part, plan["parts"], dims)
@@ -220,7 +221,7 @@ def build_code_part(job, spec, part, plan):
     messages = [{"role": "user", "content": [{"type": "text", "text": prompt}] + _images([p for p in (side_mm, front_mm, side_crop) if p])}]
     best, code = None, None
     for attempt in range(3):
-        reply = job.llm.chat(messages, model=config.BUILDER_MODEL, max_tokens=12000 if big else 8000, temperature=0.2,
+        reply = job.llm.chat(messages, model=model, max_tokens=12000 if big else 8000, temperature=0.2,
                              effort=effort)
         code = _code_from(reply.get("content"))
         messages.append({"role": "assistant", "content": reply.get("content") or ""})
@@ -241,7 +242,7 @@ def build_code_part(job, spec, part, plan):
         if not front_sq:
             refine = "(There is no front picture: the comparison has only the SIDE row.)\n" + refine
         text = job.llm.vision(refine, [cmp],
-                              model=config.BUILDER_MODEL, max_tokens=12000 if big else 8000, effort=effort, json_only=False)
+                              model=model, max_tokens=12000 if big else 8000, effort=effort, json_only=False)
         if text.strip().upper().startswith("OK") or "```" not in text:
             job.log("  part %s: accepted by its own check after %d correction(s) (%d tris)" % (name, round_no, best.get("triangles", 0)))
             return best

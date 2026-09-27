@@ -51,6 +51,10 @@ VISION_MODEL = os.environ.get("MASTERSMITH_VISION_MODEL", "google/gemini-3.8-fla
 PREMIUM_MODEL = os.environ.get("MASTERSMITH_PREMIUM_MODEL", "anthropic/claude-sonnet-5")
 # Assembly builds (docs/ASSEMBLY.md): the builder plans the parts, writes the code parts and checks the assembly.
 BUILDER_MODEL = os.environ.get("MASTERSMITH_BUILDER_MODEL", "anthropic/claude-opus-5.5")
+# small parts (pins, levers, sights) are written by a cheaper model: the builder calls were 97% of an assembly's cost
+BUILDER_MODEL_SMALL = os.environ.get("MASTERSMITH_BUILDER_MODEL_SMALL", "anthropic/claude-sonnet-5")
+# Assembly is opt-in until it beats one seed on the same object (owner, 2026-09-27): "1" makes it the hard-surface default
+ASSEMBLY_DEFAULT = os.environ.get("MASTERSMITH_ASSEMBLY_DEFAULT", "0") == "1"
 ASSEMBLY_MAX_PARTS = int(os.environ.get("MASTERSMITH_ASSEMBLY_MAX_PARTS", "24"))
 ASSEMBLY_WORKERS = int(os.environ.get("MASTERSMITH_ASSEMBLY_WORKERS", "4"))
 ASSEMBLY_CHECK_ROUNDS = int(os.environ.get("MASTERSMITH_ASSEMBLY_CHECK_ROUNDS", "2"))

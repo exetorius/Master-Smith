@@ -27,11 +27,11 @@ How a job goes:
    category "aircraft" and rotorcraft "helicopter" (not "vehicle"). Name real machines by name
    and put that name in search_query so a real photograph is found; leave search_query empty for invented things.
    When the customer attached pictures, put them in reference_images (they are edited into the build picture).
-   Hard surfaces (weapon, vehicle, aircraft, helicopter) are built as an ASSEMBLY by default: after the pictures are
-   approved, the builder model splits the object into parts, models the parts it can in code (barrels, rails, sights,
-   housings, panels: exact edges), sends only moulded parts (a grip with finger grooves) to the mesh vendor one at a
-   time, assembles them and checks the result against the pictures itself. Nothing is repaired afterwards. Quote the
-   assembly estimate; it is dearer than one seed and much crisper. seed_vendor then picks the vendor for moulded parts.
+   One seed is the default for every category. build_mode "assembly" (on request, or when the customer wants the
+   experimental parts path) builds a hard surface as parts: after the pictures are approved, the builder model splits
+   the object, the vendor models the sculpted main body in one piece, the builder models the mechanical parts in code
+   (barrels, rails, sights, pins, wheels: exact edges), and they are assembled and checked against the pictures. Quote
+   its estimate; it is dearer than one seed. seed_vendor then picks the vendor for the moulded parts.
    For a one-seed build (build_mode "single") of a hard surface from the customer's photo, seed_vendor "hitem3d3mv" is the
    quality pick: Hi3D v3's crisp geometry from every approved angle, same price as one angle. `premium` only changes
    the picture model (pin picture_model instead).
@@ -90,10 +90,9 @@ TOOLS = [
             "premium": {"type": "boolean", "description": "Dearer picture model for hard briefs; it changes the pictures only. "
                         "Pinning picture_model does the same without the flag."},
             "build_mode": {"type": "string", "enum": ["assembly", "single"],
-                           "description": "Leave unset: hard surfaces (weapon, vehicle, aircraft, helicopter) are built as an ASSEMBLY - "
-                                          "the builder plans the parts from the approved pictures, models what it can in code with crisp "
-                                          "edges, sends only moulded parts to the mesh vendor, assembles and checks it. 'single' builds one "
-                                          "vendor mesh of the whole object (the old path); 'assembly' forces parts for another category."},
+                           "description": "Leave unset for one vendor mesh (the default). 'assembly' builds a hard surface as parts: "
+                                          "the vendor models the sculpted main body, the builder models the mechanical parts in code with crisp "
+                                          "edges, and they are assembled and checked against the pictures (experimental, dearer)."},
             "seed_vendor": {"type": "string", "enum": ["tripo", "hitem3d3mv", "hitem3d3", "meshy7mv", "meshy7", "hitem3d"],
                             "description": "The mesh vendor. Leave unset for the default (Tripo). hitem3d3 = Hitem3D v3 at 2048 voxels, the "
                                            "crispest hard-surface geometry (about $2.10 a seed): the answer to melted rails, fused trigger "

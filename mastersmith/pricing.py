@@ -155,8 +155,10 @@ def vendor_catalogue():
 
 
 # Assembly builds: what the builder model's calls and the vendor parts cost at most. Settled to actual usage.cost.
-BUILDER_CALL_USD = 0.30             # one builder call with pictures (plan, part code, part check, assembly check)
+BUILDER_CALL_USD = 0.30             # one builder call with pictures (plan, big part code, checks)
+BUILDER_SMALL_CALL_USD = 0.08       # one call of the cheaper builder for a small part
 ASSEMBLY_CODE_PARTS = 10            # the worst case reserves this many code parts at 2.5 builder calls each
+ASSEMBLY_BIG_PARTS = 3              # of which this many are big enough for the main builder
 ASSEMBLY_VENDOR_PARTS = 3
 
 
@@ -168,7 +170,7 @@ def estimate_assembly(spec):
     return [
         ("parts plan from the approved pictures (builder)", 2 * BUILDER_CALL_USD),
         ("code parts: modelled, built and self-checked (builder, up to %d parts)" % ASSEMBLY_CODE_PARTS,
-         ASSEMBLY_CODE_PARTS * 2.5 * BUILDER_CALL_USD),
+         2.5 * (ASSEMBLY_BIG_PARTS * BUILDER_CALL_USD + (ASSEMBLY_CODE_PARTS - ASSEMBLY_BIG_PARTS) * BUILDER_SMALL_CALL_USD)),
         ("vendor parts: drawn alone and seeded (up to %d, %s)" % (ASSEMBLY_VENDOR_PARTS, vendor["label"] if vendor["key"].startswith("hitem3d3") else "Tripo H3.1"),
          ASSEMBLY_VENDOR_PARTS * (image_price(edit_model(spec)) + 2 * LLM_CALL_ALLOWANCE_USD + part_seed)),
         ("assembly checks against the pictures (builder)", config.ASSEMBLY_CHECK_ROUNDS * BUILDER_CALL_USD),

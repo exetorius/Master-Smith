@@ -7,13 +7,14 @@ STYLES = ("realistic", "stylized")
 
 
 def assembly_wanted(spec):
-    """Hard surfaces are built from planned parts unless the brief asks for one seed; the pipeline still falls back to
-    one seed when the approved pictures have no side and front view."""
+    """An assembly when the brief asks for one. Without a build_mode, hard surfaces are assembled only when
+    MASTERSMITH_ASSEMBLY_DEFAULT=1: until assemblies beat one seed on the same object, one seed is the default."""
+    from . import config
     if spec.build_mode == "single":
         return False
     if spec.build_mode == "assembly":
         return True
-    return spec.category in ("weapon", "vehicle", "aircraft", "helicopter") and bool(spec.multiview)
+    return config.ASSEMBLY_DEFAULT and spec.category in ("weapon", "vehicle", "aircraft", "helicopter") and bool(spec.multiview)
 
 
 def weapon_has_glass(description):
