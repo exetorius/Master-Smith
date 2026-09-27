@@ -226,3 +226,23 @@ def test_the_kit_shapes_build():
         if keep:
             import shutil
             shutil.copytree(os.path.join(d, "parts"), keep, dirs_exist_ok=True)
+
+
+def test_fit_score_prefers_the_build_that_matches_the_picture():
+    from PIL import Image, ImageDraw
+    from mastersmith.stages.assembly import fit_score
+    with tempfile.TemporaryDirectory() as d:
+        ref = Image.new("RGB", (400, 200), (240, 240, 240))                  # backdrop in the corners
+        ImageDraw.Draw(ref).rectangle((100, 50, 299, 149), fill=(40, 40, 40))  # the part fills its box
+        ref.save(os.path.join(d, "side.png"))
+        box = [25, 75, 25, 75]                                               # percent: exactly that rectangle
+        good = Image.new("RGBA", (256, 256), (0, 0, 0, 0))                   # box 2:1 -> 256 x 128 band in the middle
+        ImageDraw.Draw(good).rectangle((0, 64, 255, 191), fill=(200, 200, 200, 255))
+        good.save(os.path.join(d, "good.png"))
+        broken = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+        for x in range(0, 256, 64):
+            ImageDraw.Draw(broken).rectangle((x, 64, x + 20, 191), fill=(200, 200, 200, 255))
+        broken.save(os.path.join(d, "broken.png"))
+        g = fit_score(os.path.join(d, "side.png"), box, os.path.join(d, "good.png"))
+        b = fit_score(os.path.join(d, "side.png"), box, os.path.join(d, "broken.png"))
+        assert g > 0.95 and b < 0.5

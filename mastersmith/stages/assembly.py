@@ -127,6 +127,46 @@ def _box_square(src, box_pct, dst, size=512):
     return dst
 
 
+def _backdrop(src):
+    """The picture's backdrop colour: the median of its four corners (a silhouette-cropped picture still has backdrop
+    in its corners)."""
+    import numpy as np
+    a = np.asarray(Image.open(src).convert("RGB")).astype(np.float32) / 255.0
+    k = max(2, min(a.shape[0], a.shape[1]) // 40)
+    return np.median(np.concatenate([a[:k, :k].reshape(-1, 3), a[:k, -k:].reshape(-1, 3), a[-k:, :k].reshape(-1, 3),
+                                     a[-k:, -k:].reshape(-1, 3)]), axis=0)
+
+
+def fit_score(src, box_pct, render, size=256):
+    """How well a part's side render covers what the reference shows inside its box: the IoU of the two silhouettes in
+    the same framing (the render is orthographic, framed on the box, longer side filling a transparent square). The
+    reference box may include parts passing through it, so the number is for comparing builds of one part, not an
+    absolute grade. -> 0..1, or None when it cannot be measured."""
+    import numpy as np
+    try:
+        back = _backdrop(src)
+        im = Image.open(src).convert("RGB")
+        w, h = im.size
+        x0, x1, y0, y1 = box_pct
+        crop = im.crop((int(x0 / 100 * w), int(y0 / 100 * h), max(int(x0 / 100 * w) + 1, int(x1 / 100 * w)),
+                        max(int(y0 / 100 * h) + 1, int(y1 / 100 * h))))
+        cw, ch = crop.size
+        ref = np.abs(np.asarray(crop).astype(np.float32) / 255.0 - back).max(axis=2) > 0.08
+        r = Image.open(render).convert("RGBA")
+        sq = r.width
+        s_ = sq / float(max(cw, ch))
+        rw, rh = max(1, round(cw * s_)), max(1, round(ch * s_))
+        ox, oy = (sq - rw) // 2, (sq - rh) // 2
+        alpha = np.asarray(r.crop((ox, oy, ox + rw, oy + rh)).getchannel("A")) > 20
+        tw, th = (size, max(1, round(size * ch / cw))) if cw >= ch else (max(1, round(size * cw / ch)), size)
+        a = np.asarray(Image.fromarray(ref.astype(np.uint8) * 255).resize((tw, th))) > 127
+        b = np.asarray(Image.fromarray(alpha.astype(np.uint8) * 255).resize((tw, th))) > 127
+        union = np.logical_or(a, b).sum()
+        return round(float(np.logical_and(a, b).sum()) / float(union), 3) if union else None
+    except Exception:
+        return None
+
+
 def _mm_scale(src, dst, span_m, axes):
     """Tick marks every tenth of the square with millimetre labels from the centre: `span_m` is the side of the square
     in metres, `axes` the two axis names ("x", "z")."""
@@ -244,6 +284,7 @@ def build_code_part(job, spec, part, plan):
         res = _run_part(job, part, code, out_dir, attempt)
         if res.get("ok"):
             best = {**res, "code": code}
+            best["fit"] = fit_score(plan["side"], part["side_box"], os.path.join(out_dir, best["box_renders"]["left"]))
             break
         job.log("  part %s attempt %d: %s" % (name, attempt + 1, str(res.get("error"))[:160]))
         messages.append({"role": "user", "content": "That failed: %s\nAnswer with the corrected complete function." % res.get("error")})
@@ -277,7 +318,15 @@ def build_code_part(job, spec, part, plan):
         if not res.get("ok"):
             job.log("  part %s: correction %d failed (%s); keeping the previous build" % (name, round_no + 1, str(res.get("error"))[:120]))
             return best
-        best = {**res, "code": _code_from(text), "refined": round_no + 1}
+        fit = fit_score(plan["side"], part["side_box"], os.path.join(out_dir, res["box_renders"]["left"]))
+        if fit is not None and best.get("fit") is not None and fit < best["fit"] - 0.05:
+            # a correction can break a part that was nearly right: on the bullpup of 2026-09-27 the barrel's fit fell
+            # from 0.58 to 0.22 and the handguard came back shattered, and both were taken. The silhouette says which
+            # is closer to the picture; the next round critiques the better build again.
+            job.log("  part %s: correction %d fits the picture worse (%.2f < %.2f); keeping the previous build"
+                    % (name, round_no + 1, fit, best["fit"]))
+            continue
+        best = {**res, "code": _code_from(text), "refined": round_no + 1, "fit": fit}
         job.log("  part %s: corrected (%s)" % (name, why))
     return best
 
@@ -296,7 +345,12 @@ def _run_part(job, part, code, out_dir, tag):
         codecheck.check_code(code)
     except codecheck.CodeRejected as exc:
         return {"ok": False, "error": "rejected before running: %s" % exc}
-    run_dir = os.path.join(out_dir, "run_%s" % tag)
+    run = "run_%s" % tag
+    k = 1
+    while os.path.exists(os.path.join(out_dir, run)):     # a rebuild must not overwrite the build it may lose to
+        k += 1
+        run = "run_%s_%d" % (tag, k)
+    run_dir = os.path.join(out_dir, run)
     try:
         _blender(job, "build_part.py", {"name": part["name"], "code": code, "size": _size(part), "material": part["material"],
                                         "out_dir": run_dir, "render_size": 448}, "part_%s_%s" % (part["name"], tag),
@@ -308,8 +362,8 @@ def _run_part(job, part, code, out_dir, tag):
         return {"ok": False, "error": "Blender wrote no result"}
     res = json.load(open(path))
     if res.get("ok"):
-        res["renders"] = {k: os.path.join("run_%s" % tag, v) for k, v in res["renders"].items()}
-        res["box_renders"] = {k: os.path.join("run_%s" % tag, v) for k, v in (res.get("box_renders") or {}).items()}
+        res["renders"] = {k: os.path.join(run, v) for k, v in res["renders"].items()}
+        res["box_renders"] = {k: os.path.join(run, v) for k, v in (res.get("box_renders") or {}).items()}
     return res
 
 
@@ -535,6 +589,11 @@ def build_assembly(job, spec, ref):
                 if b:
                     b["redone"] = True
             else:
+                b = None
+            old = built.get(p["name"]) or {}
+            if b and b.get("fit") is not None and old.get("fit") is not None and b["fit"] < old["fit"] - 0.05:
+                job.log("  part %s: the rebuild fits the picture worse (%.2f < %.2f); keeping the previous one"
+                        % (p["name"], b["fit"], old["fit"]))
                 b = None
             if b:
                 built[p["name"]] = b
