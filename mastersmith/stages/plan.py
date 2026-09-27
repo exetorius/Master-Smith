@@ -42,7 +42,9 @@ Answer JSON only:
  (metal is true ONLY for bare metal - blued or parkerised steel, anodised aluminium, chrome. Anything painted, coated
  or plastic is metal false, even on a steel body: a painted truck panel is not metal.)
  "notes": "anything the assembly must respect"}}
-Boxes of touching parts may overlap slightly where they join. Together the boxes must cover the whole silhouette."""
+Boxes of parts that touch MUST overlap by 1-2% where they join (a trigger guard into the frame, a grip into the
+receiver): parts are modelled one at a time and a box that only meets its neighbour leaves a visible gap.
+Together the boxes must cover the whole silhouette."""
 
 
 NO_FRONT_FROM = """Picture 2 is the FRONT view (looking back at the forward end), cropped exactly to the object: the object's left is on

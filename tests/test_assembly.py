@@ -79,6 +79,20 @@ def test_views_for_a_plan_fall_back_to_the_side_alone():
     assert pick_views({"views": ["tq"]}, "vehicle") is None and pick_views({"views": ["a", "b"]}, "prop") is None
 
 
+def test_contact_faces_come_from_the_boxes():
+    from mastersmith.stages.assembly import contacts
+    frame = {"name": "Frame", "box_min": [-0.08, -0.016, 0.016], "box_max": [0.08, 0.016, 0.040]}
+    guard = {"name": "Guard", "box_min": [-0.013, -0.009, -0.012], "box_max": [0.039, 0.008, 0.017]}
+    sight = {"name": "Sight", "box_min": [0.06, -0.004, 0.040], "box_max": [0.07, 0.004, 0.050]}
+    far = {"name": "Far", "box_min": [0.5, 0.5, 0.5], "box_max": [0.6, 0.6, 0.6]}
+    parts = [frame, guard, sight, far]
+    dims = (0.185, 0.038, 0.132)
+    assert contacts(guard, parts, dims) == ["the top (+z) face meets Frame"]
+    assert contacts(sight, parts, dims) == ["the bottom (-z) face meets Frame"]
+    assert set(contacts(frame, parts, dims)) == {"the bottom (-z) face meets Guard", "the top (+z) face meets Sight"}
+    assert contacts(far, parts, dims) == []
+
+
 def test_plan_validation_cleans_names_methods_and_materials():
     dims = (0.68, 0.14, 0.27)
     raw = {"parts": [

@@ -60,8 +60,9 @@ CHECK_PROMPT = """You are checking an assembled game asset against its reference
 and front views. Pictures 3 and 4: the assembly, same framing, same grid. Blue rectangles are the planned part boxes
 (percent of the pictures), labelled by name.
 The parts: {parts}
-Find parts that are in the wrong place or the wrong size by more than 2% of the picture, and parts whose shape is
-clearly wrong. Answer JSON only:
+Find parts that are in the wrong place or the wrong size by more than 2% of the picture, parts whose shape is
+clearly wrong, and GAPS: parts that should touch (a guard and the frame, a grip and the receiver) with background
+showing between them - move the part so its box overlaps the neighbour's. Answer JSON only:
 {{"ok": true/false, "moves": [{{"name": "...", "side_box": [x_left, x_right, z_top, z_bottom], "front_span": [y_left, y_right]}}],
   "rebuild": [{{"name": "...", "why": "what is wrong with its shape"}}], "notes": "..."}}
 Coordinates in percent of the REFERENCE pictures, like the plan. Empty lists when nothing needs changing."""
@@ -153,6 +154,33 @@ def _compare(pairs, dst):
     return dst
 
 
+SIDES = {(0, 0): "rear (-x)", (0, 1): "front (+x)", (1, 0): "right (-y)", (1, 1): "left (+y)", (2, 0): "bottom (-z)",
+         (2, 1): "top (+z)"}
+
+
+def contacts(part, parts, dims):
+    """Which neighbours this part's box meets, and on which face: boxes that overlap or nearly touch (within 1.5% of the
+    object) along one axis while overlapping on the other two. -> ["the top (+z) face meets FrameReceiver", ...]"""
+    tol = 0.015 * max(dims)
+    out = []
+    a0, a1 = part["box_min"], part["box_max"]
+    for q in parts:
+        if q is part or q["name"] == part["name"]:
+            continue
+        b0, b1 = q["box_min"], q["box_max"]
+        over = [min(a1[i], b1[i]) - max(a0[i], b0[i]) for i in range(3)]
+        if sum(o > 0 for o in over) < 2 or any(o < -tol for o in over):
+            continue
+        # the contact axis: the one with the least overlap (or a small gap); the face is the side the neighbour is on
+        axis = min(range(3), key=lambda i: over[i])
+        a_len = a1[axis] - a0[axis]
+        if over[axis] > 0.5 * a_len:
+            continue                             # the neighbour sits inside this box, not against a face of it
+        side = 1 if (b0[axis] + b1[axis]) > (a0[axis] + a1[axis]) else 0
+        out.append("the %s face meets %s" % (SIDES[(axis, side)], q["name"]))
+    return out
+
+
 def _size(part):
     return [round(part["box_max"][i] - part["box_min"][i], 5) for i in range(3)]
 
@@ -177,6 +205,11 @@ def build_code_part(job, spec, part, plan):
     effort = "high" if big else "medium"
     prompt = CODE_PROMPT.format(category=spec.category, description=spec.description[:600], name=name, what=part["what"],
                                 L_mm=L * 1000, W_mm=W * 1000, H_mm=H * 1000, kit=codecheck.KIT_DOC)
+    joins = contacts(part, plan["parts"], dims)
+    if joins:
+        # parts are built one at a time: the pistol's trigger guard and grip stopped short of the frame (2026-09-27)
+        prompt += ("\n\nWhere it joins: %s. At each of those faces the part must reach the edge of its box, solidly, so it "
+                   "closes against the neighbour with no gap (an open loop's top, a grip's upper end, a bracket's foot)." % "; ".join(joins))
     if front_mm is None:
         prompt = prompt.replace("Picture 2: the same from the FRONT (the part's left on the right of the picture): y across, z up, millimetres.\nPicture 3:",
                                 "There is no front picture: shape the cross-section (y) from the description and how such a part is made.\nPicture 2:")
