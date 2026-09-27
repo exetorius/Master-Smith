@@ -91,6 +91,8 @@ _quad_env = os.environ.get("MASTERSMITH_SEED_QUAD", "")
 SEED_QUAD = _quad_env == "1" if _quad_env in ("0", "1") else None   # None -> by category
 EDIT_MODEL = os.environ.get("MASTERSMITH_EDIT_MODEL", "fal-ai/nano-banana-2")   # photo -> clean profile / other view (its /edit endpoint)
 CUTOUT_MODEL = "fal-ai/birefnet/v2"             # background removal, $0.003
+# 4x upscale of the plan pictures, framing unchanged: a trigger is ~100 px in a 1200 px reference (assemblies)
+UPSCALE_MODEL = os.environ.get("MASTERSMITH_UPSCALE_MODEL", "fal-ai/esrgan")
 SEED_MODEL = "tripo3d/h3.1/image-to-3d"         # full PBR, thin parts survive
 SEED_MULTIVIEW_MODEL = "tripo3d/h3.1/multiview-to-3d"
 SEED_ALT_MODEL = "fal-ai/hyper3d/rodin/v2"      # several references at once; refuses military subjects

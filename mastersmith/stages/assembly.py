@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
 from .. import config, pricing
-from ..fal import first_url
+from ..fal import first_url, image_url
 from ..llm import extract_json
 from .finish import BLENDER_DIR, _blender
 from .partorient import PART_CHECK, orient_part
@@ -251,14 +251,16 @@ def build_code_part(job, spec, part, plan):
     name = part["name"]
     out_dir = os.path.join(job.work_dir, "parts", name)
     os.makedirs(out_dir, exist_ok=True)
-    side_crop = _crop_part(plan["side"], part["side_box"][:2] + part["side_box"][2:], os.path.join(out_dir, "ref_side.png"))
+    side_src = plan.get("side_hi") or plan["side"]         # the sharpened picture when there is one: same framing
+    side_crop = _crop_part(side_src, part["side_box"][:2] + part["side_box"][2:], os.path.join(out_dir, "ref_side.png"))
     L, W, H = _size(part)
     zt, zb = part["side_box"][2], part["side_box"][3]
-    side_sq = _box_square(plan["side"], part["side_box"], os.path.join(out_dir, "box_side.png"))
+    side_sq = _box_square(side_src, part["side_box"], os.path.join(out_dir, "box_side.png"))
     side_mm = _mm_scale(side_sq, os.path.join(out_dir, "box_side_mm.png"), max(L, H), ("x", "z"))
     front_sq = front_mm = None
     if plan.get("front"):
-        front_sq = _box_square(plan["front"], part["front_span"] + [zt, zb], os.path.join(out_dir, "box_front.png"))
+        front_sq = _box_square(plan.get("front_hi") or plan["front"], part["front_span"] + [zt, zb],
+                               os.path.join(out_dir, "box_front.png"))
         front_mm = _mm_scale(front_sq, os.path.join(out_dir, "box_front_mm.png"), max(W, H), ("y", "z"))
     dims = plan.get("dims_m") or [L, W, H]
     big = L > 0.25 * dims[0] or H > 0.35 * dims[2]           # a housing or stock carries the look: think harder
@@ -467,13 +469,33 @@ def detail_map(src, dst, blur_frac=0.006):
     return dst
 
 
+def _sharpen(job, src, dst):
+    """The picture upscaled 4x with the framing unchanged, so a small part's box crop shows its real edges instead of a
+    blurred enlargement (a pistol trigger is ~100 px in a 1200 px reference). None when the upscale fails or changes
+    the framing: the part builder then uses the picture as it is."""
+    try:
+        out = job.fal.run(config.UPSCALE_MODEL, {"image_url": job.fal.upload(src), "scale": 4,
+                                                 "model": "RealESRGAN_x4plus", "output_format": "png"})
+        url = image_url(out)
+        if not url:
+            raise ValueError("no picture in the answer")
+        job.fal.download(url, dst)
+        a, b = Image.open(src).size, Image.open(dst).size
+        if abs(a[0] / a[1] - b[0] / b[1]) > 0.01 or b[0] < a[0] * 1.5:
+            raise ValueError("the upscale changed the framing (%s -> %s)" % (a, b))
+        return dst
+    except Exception as exc:
+        job.log("  plan picture not sharpened (%s); parts use it as it is" % str(exc)[:120])
+        return None
+
+
 def _detail(job, plan):
     """Detail maps from the plan's side and front pictures, for the assembler (None when they cannot be made)."""
     try:
-        d = {"side": detail_map(plan["side"], os.path.join(job.work_dir, "detail_side.png")), "front": None,
+        d = {"side": detail_map(plan.get("side_hi") or plan["side"], os.path.join(job.work_dir, "detail_side.png")), "front": None,
              "dims": plan["dims_m"], "strength": 0.5}
         if plan.get("front"):
-            d["front"] = detail_map(plan["front"], os.path.join(job.work_dir, "detail_front.png"))
+            d["front"] = detail_map(plan.get("front_hi") or plan["front"], os.path.join(job.work_dir, "detail_front.png"))
         return d
     except Exception as exc:                  # detail is a nicety: an odd picture must not stop the build
         job.log("  reference detail skipped: %s" % str(exc)[:120])
@@ -533,6 +555,9 @@ def build_assembly(job, spec, ref):
     side_src, front_src, mirror = views
     job.stage("plan")
     plan = make_plan(job, spec, side_src, front_src, mirror)
+    plan["side_hi"] = _sharpen(job, plan["side"], os.path.join(job.work_dir, "plan_side_hi.png"))
+    if plan.get("front"):
+        plan["front_hi"] = _sharpen(job, plan["front"], os.path.join(job.work_dir, "plan_front_hi.png"))
     plan["detail"] = _detail(job, plan)
     job.stage("parts")
     built = {}

@@ -16,6 +16,7 @@ FAL_PRICES = {
     "fal-ai/meshy/v7/multi-image-to-3d": 0.05,   # MEASURED 2026-09-18 via fal's balance endpoint: $0.034 and $0.037
                                                  # on two 4-view 300k-quad PBR runs. Held at 0.05 as the reservation.
     "fal-ai/birefnet/v2": 0.003,
+    "fal-ai/esrgan": 0.02,                       # CALIBRATE: billed per compute second, a 1K picture x4 is ~1-3 s
     # pictures on fal (fal's published per-image prices, 2026-09-24; 2K/4K outputs cost more)
     "fal-ai/nano-banana-2": 0.08, "fal-ai/nano-banana-2/edit": 0.08,
     "fal-ai/nano-banana": 0.04, "fal-ai/nano-banana/edit": 0.04,
@@ -169,6 +170,7 @@ def estimate_assembly(spec):
         price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"})
     return [
         ("parts plan from the approved pictures (builder)", 2 * BUILDER_CALL_USD),
+        ("plan pictures sharpened 4x for the part builder (ESRGAN)", 2 * FAL_PRICES.get(config.UPSCALE_MODEL, 0.02)),
         ("code parts: modelled, built and self-checked (builder, up to %d parts)" % ASSEMBLY_CODE_PARTS,
          2.5 * (ASSEMBLY_BIG_PARTS * BUILDER_CALL_USD + (ASSEMBLY_CODE_PARTS - ASSEMBLY_BIG_PARTS) * BUILDER_SMALL_CALL_USD)),
         ("vendor parts: drawn alone and seeded (up to %d, %s)" % (ASSEMBLY_VENDOR_PARTS, vendor["label"] if vendor["key"].startswith("hitem3d3") else "Tripo H3.1"),
