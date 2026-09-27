@@ -117,8 +117,50 @@ if not parts:
 
 # ---------------------------------------------------------------- the triangle budget: code parts as built, vendor parts share the rest
 budget = int(args["tri_budget"])
-code_tris = sum(blib.tri_count(o) for o, r in parts if r["kind"] == "code")
 vendor = [(o, r) for o, r in parts if r["kind"] == "vendor"]
+
+
+def sharp_by_angle(o, degrees=30):
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    lim = math.radians(degrees)
+    for f in bm.faces:
+        f.smooth = True
+    for e in bm.edges:
+        e.smooth = not (e.is_manifold and e.calc_face_angle(0.0) > lim)
+    bm.to_mesh(o.data)
+    bm.free()
+
+
+# code parts over their share (the truck's tyre treads came to 120k triangles of a 100k budget, 2026-09-27): flat areas
+# are dissolved first, which changes no shape, then the part is collapsed to its share by surface area
+code = [(o, r) for o, r in parts if r["kind"] == "code"]
+code_allow = int(budget * (0.6 if vendor else 0.9))
+code_tris = sum(blib.tri_count(o) for o, _r in code)
+if code_tris > code_allow:
+    c_areas = [surface_area(o) for o, _r in code]
+    for (o, r), a in zip(code, c_areas):
+        share = max(300, int(code_allow * a / max(sum(c_areas), 1e-9)))
+        have = blib.tri_count(o)
+        if have <= share:
+            continue
+        m = o.modifiers.new("flat", "DECIMATE")
+        m.decimate_type = "DISSOLVE"
+        m.angle_limit = math.radians(0.5)
+        m.delimit = {"UV", "MATERIAL", "SHARP"}
+        blib.select_only([o])
+        bpy.ops.object.modifier_apply(modifier="flat")
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        bmesh.ops.triangulate(bm, faces=bm.faces[:])
+        bm.to_mesh(o.data)
+        bm.free()
+        decimate_to(o, share)
+        sharp_by_angle(o)
+        r["triangles_built"] = have
+        r["triangles"] = blib.tri_count(o)
+    log("code parts over their %d allowance: %d -> %d triangles" % (code_allow, code_tris, sum(blib.tri_count(o) for o, _r in code)))
+    code_tris = sum(blib.tri_count(o) for o, _r in code)
 left = max(budget - code_tris, int(budget * 0.3))
 areas = [surface_area(o) for o, _r in vendor]
 for (o, r), a in zip(vendor, areas):
@@ -142,28 +184,65 @@ for o, _r in parts:
     o.data.uv_layers[0].name = "UVMap"
     while len(o.data.uv_layers) > 1:
         o.data.uv_layers.remove(o.data.uv_layers[1])
+
+
+def tile_layout(sizes, gap=0.004):
+    """Shelf-pack squares of relative side `sizes` into the unit square at the largest common scale that fits.
+    -> [(u0, v0, side)] in input order."""
+    order = sorted(range(len(sizes)), key=lambda i: -sizes[i])
+    lo, hi, best = 0.0, 4.0 / max(max(sizes), 1e-9), None
+    for _ in range(40):
+        k = (lo + hi) / 2
+        x = y = row = 0.0
+        pos, fits = {}, True
+        for i in order:
+            s = sizes[i] * k
+            if x + s > 1.0 + 1e-9:
+                x, y, row = 0.0, y + row + gap, 0.0
+            if s > 1.0 or y + s > 1.0 + 1e-9:
+                fits = False
+                break
+            pos[i] = (x, y, s)
+            x += s + gap
+            row = max(row, s)
+        if fits:
+            lo, best = k, pos
+        else:
+            hi = k
+    return [best[i] for i in range(len(sizes))]
+
+
+# the atlas: each part keeps its own unwrap inside a square tile sized by its surface area. Packing every island of every
+# part together failed on the truck: thousands of tread islands, each with a margin, shrank to dots (7% of the atlas used)
+tiles = tile_layout([math.sqrt(max(surface_area(o), 1e-12)) for o, _r in parts])
+for (o, r), (u0, v0, side) in zip(parts, tiles):
+    src = o.data.uv_layers["UVMap"]
+    dst = o.data.uv_layers.new(name="Atlas")
+    n = len(src.data)
+    uv = np.empty(n * 2, np.float32)
+    src.data.foreach_get("uv", uv)
+    uv = uv.reshape(-1, 2)
+    lo_uv, hi_uv = uv.min(axis=0), uv.max(axis=0)
+    span = np.maximum(hi_uv - lo_uv, 1e-9)
+    pad = side * 0.01
+    uv = (uv - lo_uv) / span.max() * (side - 2 * pad) + np.array([u0 + pad, v0 + pad])
+    dst.data.foreach_set("uv", uv.ravel())
+    r["atlas_tile"] = [round(u0, 4), round(v0, 4), round(side, 4)]
 blib.select_only([o for o, _r in parts])
 bpy.ops.object.join()
 high = bpy.context.view_layer.objects.active
 high.name = "MS_high"
+high.data.uv_layers["UVMap"].active = True
+high.data.uv_layers["UVMap"].active_render = True           # the source textures read their own unwrap
 lod0 = high.copy()
 lod0.data = high.data.copy()
 bpy.context.collection.objects.link(lod0)
 lod0.name = "SM_" + NAME
-# the atlas: every part's own islands, scaled to one texel density and packed together
 blib.select_only([lod0])
-atlas = lod0.data.uv_layers.new(name="Atlas")
-lod0.data.uv_layers.active = atlas
-for i in range(len(lod0.data.uv_layers[0].data)):
-    atlas.data[i].uv = lod0.data.uv_layers[0].data[i].uv
-bpy.ops.object.mode_set(mode="EDIT")
-bpy.ops.mesh.select_all(action="SELECT")
-bpy.ops.uv.select_all(action="SELECT")
-bpy.ops.uv.average_islands_scale()
-bpy.ops.uv.pack_islands(margin=0.004, rotate=True)
-bpy.ops.object.mode_set(mode="OBJECT")
-lod0.data.uv_layers.remove(lod0.data.uv_layers[0])
+lod0.data.uv_layers.remove(lod0.data.uv_layers["UVMap"])
 lod0.data.uv_layers["Atlas"].name = "UVMap"
+lod0.data.uv_layers["UVMap"].active = True
+lod0.data.uv_layers["UVMap"].active_render = True
 
 size = int(args.get("atlas_size", 2048))
 lo, hi = blib.dims(high)
@@ -201,7 +280,7 @@ def bake(tag, kind, colour, **extra):
 
 
 def route_to_emission(what):
-    """Temporarily feed each HIGH material's `what` input (Metallic) into an emission, so EMIT bakes it."""
+    """Temporarily feed each HIGH material's `what` input (Base Color, Metallic) into an emission, so EMIT bakes it."""
     undo = []
     for m in {s.material for s in high.material_slots if s.material and s.material.node_tree}:
         t = m.node_tree
@@ -215,8 +294,8 @@ def route_to_emission(what):
         if src.is_linked:
             t.links.new(src.links[0].from_socket, e.inputs["Color"])
         else:
-            v = float(src.default_value)
-            e.inputs["Color"].default_value = (v, v, v, 1)
+            v = src.default_value
+            e.inputs["Color"].default_value = tuple(v)[:3] + (1,) if hasattr(v, "__len__") else (float(v),) * 3 + (1,)
         for l in list(outn.inputs["Surface"].links):
             t.links.remove(l)
         t.links.new(e.outputs["Emission"], outn.inputs["Surface"])
@@ -233,7 +312,13 @@ def restore(undo):
         t.nodes.remove(e)
 
 
-bc = bake("BC", "DIFFUSE", True, pass_filter={"COLOR"})
+# base colour through an emission: Cycles' diffuse colour pass is zero on metal, and every part planned as metal (the
+# truck's painted body, the bullpup's steel) baked black (2026-09-27)
+undo = route_to_emission("Base Color")
+try:
+    bc = bake("BC", "EMIT", True)
+finally:
+    restore(undo)
 rough = bake("R", "ROUGHNESS", False)
 undo = route_to_emission("Metallic")
 try:

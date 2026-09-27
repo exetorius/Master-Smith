@@ -39,6 +39,8 @@ Answer JSON only:
   "side_box": [x_left, x_right, z_top, z_bottom],    percent of picture 1, tight around the part as seen from the side
   "front_span": [y_left, y_right],                   percent of picture 2 across, tight around the part as seen from the front
   "material": {{"color": "#rrggbb as the camera sees it", "metal": true/false, "roughness": 0.0-1.0, "glass": false}}}}],
+ (metal is true ONLY for bare metal - blued or parkerised steel, anodised aluminium, chrome. Anything painted, coated
+ or plastic is metal false, even on a steel body: a painted truck panel is not metal.)
  "notes": "anything the assembly must respect"}}
 Boxes of touching parts may overlap slightly where they join. Together the boxes must cover the whole silhouette."""
 
