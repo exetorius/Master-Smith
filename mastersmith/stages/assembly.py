@@ -79,12 +79,18 @@ Coordinates in percent of the REFERENCE pictures, like the plan. Empty lists whe
 
 
 def _code_from(text):
-    """The fenced block that holds def build (a reply can quote other snippets first), else the last block."""
-    blocks = re.findall(r"```(?:python|py)?[ \t]*\n?(.*?)```", text or "", re.S)
+    """The fenced block that holds def build (a reply can quote other snippets first), else the last block. A reply cut
+    off inside its block (the feature list ahead of the code uses tokens) or without fences gives the text from
+    `def build(` on, so the error the builder sees is about its code, not about the prose before it."""
+    text = text or ""
+    blocks = re.findall(r"```(?:python|py)?[ \t]*\n?(.*?)```", text, re.S)
     for b in blocks:
         if "def build(" in b:
             return b.strip()
-    return (blocks[-1] if blocks else (text or "")).strip()
+    at = text.rfind("def build(")
+    if at >= 0:
+        return text[at:].split("```")[0].strip()
+    return (blocks[-1] if blocks else text).strip()
 
 
 def _crop_part(src, box_pct, dst, margin=0.18):
@@ -231,7 +237,7 @@ def build_code_part(job, spec, part, plan):
     messages = [{"role": "user", "content": [{"type": "text", "text": prompt}] + _images([p for p in (side_mm, front_mm, side_crop) if p])}]
     best, code = None, None
     for attempt in range(3):
-        reply = job.llm.chat(messages, model=model, max_tokens=12000 if big else 8000, temperature=0.2,
+        reply = job.llm.chat(messages, model=model, max_tokens=16000 if big else 12000, temperature=0.2,
                              effort=effort)
         code = _code_from(reply.get("content"))
         messages.append({"role": "assistant", "content": reply.get("content") or ""})
@@ -252,7 +258,7 @@ def build_code_part(job, spec, part, plan):
         if not front_sq:
             refine = "(There is no front picture: the comparison has only the SIDE row.)\n" + refine
         text = job.llm.vision(refine, [cmp],
-                              model=model, max_tokens=12000 if big else 8000, effort=effort, json_only=False)
+                              model=model, max_tokens=16000 if big else 12000, effort=effort, json_only=False)
         verdict = re.findall(r"VERDICT:\W*(OK|FIX)", text.upper())
         if "```" not in text or (verdict and verdict[-1] == "OK") or text.strip().upper().startswith("OK"):
             job.log("  part %s: accepted by its own check after %d correction(s) (%d tris)" % (name, round_no, best.get("triangles", 0)))
@@ -264,7 +270,7 @@ def build_code_part(job, spec, part, plan):
             # a correction that crashes is usually one wrong argument: worth one retry told the error (the bullpup's
             # side rail lost its correction to kit.taper(axis=...), 2026-09-27)
             text = job.llm.vision(refine + "\n\nYour corrected code failed: %s\nAnswer with the fixed complete function."
-                                  % str(res.get("error"))[:600], [cmp], model=model, max_tokens=12000 if big else 8000,
+                                  % str(res.get("error"))[:600], [cmp], model=model, max_tokens=16000 if big else 12000,
                                   effort=effort, json_only=False)
             if "```" in text:
                 res = _run_part(job, part, _code_from(text), out_dir, "refined%d_retry" % round_no)
