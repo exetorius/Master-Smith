@@ -51,7 +51,8 @@ def cmd_run(a):
     from .pipeline import build
     spec = Spec(name=a.name, description=a.description, category=a.category, style=a.style, engine=a.engine,
                 tri_budget=a.tris, size_m=a.size, reference_image=a.reference or "", multiview=not a.single_view,
-                premium=a.premium, seed_vendor=a.seed_vendor or None, picture_model=a.picture_model or None)
+                premium=a.premium, seed_vendor=a.seed_vendor or None, picture_model=a.picture_model or None,
+                build_mode=a.build_mode or None, reference_job=os.path.abspath(a.reference_job) if a.reference_job else None)
     if a.free:
         spec.seed_vendor, spec.picture_model = "local", config.LOCAL_PICTURE_MODEL
     est = pricing.estimate(spec)
@@ -136,6 +137,8 @@ def main(argv=None):
     r.add_argument("--seed-vendor", default="", help="mesh vendor key (pricing.SEED_VENDORS): tripo, hitem3d3mv, ..., local")
     r.add_argument("--picture-model", default="", help="picture model id (pricing.IMAGE_PRICES), e.g. %s" % config.LOCAL_PICTURE_MODEL)
     r.add_argument("--free", action="store_true", help="pictures and mesh on this PC (FLUX.2 klein + TRELLIS.2): $0 for both")
+    r.add_argument("--build-mode", default="", choices=("", "single", "assembly"), help="one seed (default) or an assembly of parts")
+    r.add_argument("--reference-job", default="", help="a finished reference job's folder: build from its approved pictures")
     r.add_argument("--yes", action="store_true")
     r.set_defaults(fn=cmd_run)
     im = sub.add_parser("import", help="finish a model file you already have (GLB, glTF, FBX, OBJ or a delivered .blend)")
