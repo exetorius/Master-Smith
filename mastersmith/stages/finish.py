@@ -23,7 +23,7 @@ def _blender(job, script, args, tag):
     args_path = os.path.join(job.work_dir, "%s_args.json" % tag)
     with open(args_path, "w") as f:
         json.dump(args, f, indent=1)
-    cmd = [config.BLENDER_BIN, "-b", "--python", str(BLENDER_DIR / script), "--", args_path]
+    cmd = [config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", str(BLENDER_DIR / script), "--", args_path]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=2400)
     log_path = os.path.join(job.work_dir, "%s.log" % tag)
     with open(log_path, "w", encoding="utf-8") as f:

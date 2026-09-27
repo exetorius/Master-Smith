@@ -140,7 +140,7 @@ def make_repaint(job, seed_glb, reference):
     args = {"glb": seed_glb, "out_dir": odir, "size": 1024, "views": list(VIEWS)}
     args_path = os.path.join(work, "ortho_args.json")
     json.dump(args, open(args_path, "w"))
-    proc = subprocess.run([config.BLENDER_BIN, "-b", "--python", str(BLENDER_DIR / "ortho_views.py"), "--", args_path],
+    proc = subprocess.run([config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", str(BLENDER_DIR / "ortho_views.py"), "--", args_path],
                           capture_output=True, text=True, timeout=900)
     views_path = os.path.join(odir, "views.json")
     if proc.returncode != 0 or not os.path.exists(views_path):
@@ -179,7 +179,7 @@ def make_repaint(job, seed_glb, reference):
     bpath = os.path.join(work, "repaint_args.json")
     json.dump(bargs, open(bpath, "w"), indent=1)
     job.log("  repaint: %d side picture(s) projected and baked" % len(elevations))
-    proc = subprocess.run([config.BLENDER_BIN, "-b", "--python", str(BLENDER_DIR / "repaint.py"), "--", bpath],
+    proc = subprocess.run([config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", str(BLENDER_DIR / "repaint.py"), "--", bpath],
                           capture_output=True, text=True, timeout=1800)
     with open(os.path.join(work, "blender.log"), "w", encoding="utf-8") as f:
         f.write((proc.stdout or "") + "\n--- stderr ---\n" + (proc.stderr or ""))

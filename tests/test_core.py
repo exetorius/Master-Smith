@@ -586,3 +586,77 @@ def test_add_parts_offset_is_three_floats():
              add_parts=[{"name": "Stick", "phrase": "a flight stick", "anchor": "glass", "offset_m": ["0.3", None]},
                         {"name": "Pedals", "phrase": "rudder pedals", "anchor": "glass"}])
     assert s.add_parts[0]["offset_m"] == [0.3, 0.0, 0.0] and s.add_parts[1]["offset_m"] == [0.0, 0.0, 0.0]
+
+
+def test_outside_links_must_resolve_to_public_addresses(monkeypatch, tmp_path):
+    import socket
+    from mastersmith import netsafe
+    table = {"good.example": "93.184.216.34", "lan.example": "192.168.1.20", "meta.example": "169.254.169.254",
+             "loop6.example": "::1", "mapped.example": "::ffff:127.0.0.1"}
+
+    def fake_dns(host, port, *a, **k):
+        if host not in table:
+            raise socket.gaierror("unknown")
+        fam = socket.AF_INET6 if ":" in table[host] else socket.AF_INET
+        return [(fam, socket.SOCK_STREAM, 6, "", (table[host], port))]
+    monkeypatch.setattr(netsafe.socket, "getaddrinfo", fake_dns)
+    netsafe.check_public("https://good.example/a.png")
+    for bad in ("http://lan.example/x", "http://meta.example/latest/meta-data", "http://loop6.example/", "http://mapped.example/",
+                "file:///etc/passwd", "ftp://good.example/a.png", "http://nowhere.example/"):
+        with pytest.raises(netsafe.UnsafeURL):
+            netsafe.check_public(bad)
+
+    class Resp:
+        def __init__(self, status, location=None, body=b""):
+            self.status_code, self.headers, self.body = status, {"location": location} if location else {}, body
+            self.is_redirect = location is not None
+        def close(self):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+        def raise_for_status(self):
+            pass
+        def iter_content(self, n):
+            yield self.body
+    hops = {"https://good.example/a.png": Resp(302, "http://lan.example/secret"),
+            "https://good.example/b.png": Resp(200, body=b"x" * 2048)}
+    monkeypatch.setattr(netsafe.requests, "get", lambda url, **k: hops[url])
+    with pytest.raises(netsafe.UnsafeURL):                      # a public link that redirects inward is refused
+        netsafe.download_public("https://good.example/a.png", str(tmp_path / "a.png"))
+    assert os.path.getsize(netsafe.download_public("https://good.example/b.png", str(tmp_path / "b.png"))) == 2048
+    with pytest.raises(netsafe.UnsafeURL):
+        netsafe.download_public("https://good.example/b.png", str(tmp_path / "c.png"), max_bytes=1024)
+    assert not os.path.exists(tmp_path / "c.png")
+    from mastersmith.stages import research
+    assert research.fetch_image("https://good.example/a.png") == (None, None)
+
+
+def test_the_job_store_survives_the_worker_and_requests_at_once(tmp_path):
+    """The service shares one Store between request threads and the worker: a build logs while the chat polls it."""
+    import threading
+    from mastersmith.store import Store
+    st = Store(str(tmp_path / "jobs.db"))
+    st.enqueue("job", "u", "build", {"name": "X"})
+    errors = []
+
+    def run(fn, n=300):
+        try:
+            for i in range(n):
+                fn(i)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(repr(exc))
+    work = [lambda i: st.append_log("job", "line %d" % i),
+            lambda i: st.job("job", "u"),
+            lambda i: st.enqueue("q%d_%d" % (threading.get_ident(), i), "u", "build", {"name": "Y"}),
+            lambda i: st.jobs_for("u"),
+            lambda i: st.claim_next(),
+            lambda i: st.mark_running("job")]
+    threads = [threading.Thread(target=run, args=(w,)) for w in work * 2]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert len(st.job("job")["log"].splitlines()) == 600

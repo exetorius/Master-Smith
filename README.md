@@ -37,7 +37,7 @@ Then the chat, in a second terminal:
 cd web
 npm ci
 cp .env.example .env.local
-npm run dev                                           # http://localhost:3000
+npm run dev                                           # http://localhost:3000 (this machine only)
 ```
 
 Describe an asset:
@@ -105,6 +105,10 @@ python -m mastersmith import my_rifle.glb --name Rifle --category weapon --size 
 cp .env.example .env            # keys
 docker compose up --build       # API on :8080 (with Blender inside), chat on :3000
 ```
+
+Both ports are published on 127.0.0.1 only: the chat spends your provider credit. To reach it from another machine,
+set `MASTERSMITH_WEB_PASSWORD` in `.env` (the chat then asks for it) and change the `web` port mapping in
+`docker-compose.yml`; keep the API itself private.
 
 Builds, uploads and the spend ledger persist in the `mastersmith-data` volume. Blender's Cycles renders and
 decimation are CPU-bound: give the API container cores and 8 GB.

@@ -249,7 +249,7 @@ class Director:
         self.user, self.wallet, self.log = user, wallet, log
         self.last_tools = []
         self.model = model or config.DIRECTOR_MODEL
-        self.llm = LLM(log=log)
+        self._llm = None            # made on the first chat turn: an outside director (MCP) never needs OpenRouter
         self.spec = None
         self.last_result = None
         self.last_job_id = None
@@ -501,5 +501,11 @@ class Director:
         done = ", ".join(t["name"] for t in self.last_tools) or "nothing"
         return ("I used all my tool calls this turn (%s). Look at what came back above and tell me how to go on." % done)
 
+    @property
+    def llm(self):
+        if self._llm is None:
+            self._llm = LLM(log=self.log)
+        return self._llm
+
     def chat_cost_usd(self):
-        return self.llm.spent()
+        return self._llm.spent() if self._llm else 0.0

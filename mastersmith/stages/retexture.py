@@ -14,7 +14,7 @@ STRIP = config.ROOT / "mastersmith" / "blender" / "strip_textures.py"
 def geometry_only(job, glb_path):
     """The mesh and its UVs without the packed maps: a 51 MB delivered GLB becomes a few MB (2026-09-17)."""
     out = os.path.join(job.work_dir, "retex_geometry.glb")
-    proc = subprocess.run([config.BLENDER_BIN, "-b", "--python", str(STRIP), "--", glb_path, out],
+    proc = subprocess.run([config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", str(STRIP), "--", glb_path, out],
                           capture_output=True, text=True, timeout=900)
     if proc.returncode != 0 or not os.path.exists(out):
         raise RuntimeError("could not strip the mesh for the retexture vendor: %s" % (proc.stderr or proc.stdout)[-400:])

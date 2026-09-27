@@ -5,19 +5,20 @@ served at `/docs` and `/openapi.json`. This page is the short version with `curl
 
 ## Authentication
 
-Put any string you like in `.env`:
+Put a key of your own in `.env` (make one with `python -c "import secrets; print(secrets.token_urlsafe(24))"`; the old
+example value `ms_dev_change_me` is refused at start-up):
 
 ```
-MASTERSMITH_API_KEY=ms_dev_change_me
+MASTERSMITH_API_KEY=<your key>
 ```
 
-and send it as `Authorization: Bearer ms_dev_change_me` or `X-API-Key: ms_dev_change_me`. Requests are then the user
+and send it as `Authorization: Bearer <your key>` or `X-API-Key: <your key>`. Requests are then the user
 `agent` (rename with `MASTERSMITH_API_USER`). With no key configured, every request is the local user and no header
 is needed.
 
 ```bash
 export MS=http://localhost:8080
-export H="Authorization: Bearer ms_dev_change_me"
+export H="Authorization: Bearer <your key>"
 curl -s $MS/healthz                       # {"ok":true,"blender":true,"local_mode":false,"worker":true}
 curl -s -H "$H" $MS/v1/me                 # who you are, spend, provider balances, recent jobs
 curl -s -H "$H" $MS/v1/config             # effective models, vendors, paths, flags; which keys are set (never values)
