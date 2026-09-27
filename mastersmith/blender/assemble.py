@@ -337,6 +337,17 @@ def sharp_by_angle(o, degrees=30):
     bm.free()
 
 
+# the bake source keeps every part at full detail: decimating first and baking from the decimated mesh threw away all
+# of a seed's fine detail (the free pistol's 280k-face TRELLIS body came out melted at 40k with nothing to bake back,
+# 2026-09-27). The decimated parts below become LOD0; these copies are what its maps are baked from.
+full_parts = []
+for o, _r in parts:
+    c = o.copy()
+    c.data = o.data.copy()
+    bpy.context.collection.objects.link(c)
+    c.name = o.name + "_full"
+    full_parts.append(c)
+
 # code parts over their share (the truck's tyre treads came to 120k triangles of a 100k budget, 2026-09-27): flat areas
 # are dissolved first, which changes no shape, then the part is collapsed to its share by surface area
 code = [(o, r) for o, r in parts if r["kind"] == "code"]
@@ -379,7 +390,7 @@ log("parts: %d code (%d tris), %d vendor (%d tris after their share of %d)" % (
 
 # ---------------------------------------------------------------- HIGH (parts as they are) and LOD0 (one atlas)
 blib.select_only([o for o, _r in parts])
-for o, _r in parts:
+for o in [o for o, _r in parts] + full_parts:
     if not o.data.uv_layers:
         blib.select_only([o])
         bpy.ops.object.mode_set(mode="EDIT")
@@ -435,14 +446,15 @@ for (o, r), (u0, v0, side) in zip(parts, tiles):
     r["atlas_tile"] = [round(u0, 4), round(v0, 4), round(side, 4)]
 blib.select_only([o for o, _r in parts])
 bpy.ops.object.join()
-high = bpy.context.view_layer.objects.active
+lod0 = bpy.context.view_layer.objects.active                  # the decimated parts, each in its atlas tile
+lod0.name = "SM_" + NAME
+blib.select_only(full_parts)
+bpy.ops.object.join()
+high = bpy.context.view_layer.objects.active                  # the same parts at full detail: the bake source
 high.name = "MS_high"
 high.data.uv_layers["UVMap"].active = True
 high.data.uv_layers["UVMap"].active_render = True           # the source textures read their own unwrap
-lod0 = high.copy()
-lod0.data = high.data.copy()
-bpy.context.collection.objects.link(lod0)
-lod0.name = "SM_" + NAME
+report["bake_source_triangles"] = blib.tri_count(high)
 blib.select_only([lod0])
 lod0.data.uv_layers.remove(lod0.data.uv_layers["UVMap"])
 lod0.data.uv_layers["Atlas"].name = "UVMap"

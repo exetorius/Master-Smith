@@ -192,6 +192,8 @@ def trellis(image, glb_path, res=None, seed=42, log=print, timeout=2400):
     work = tempfile.mkdtemp(prefix="trellis_", dir=os.path.dirname(os.path.abspath(glb_path)))
     out = os.path.join(work, "seed.glb")
     cmd = [str(exe), str(image), out, "--models", str(models), "--res", str(res), "--seed", str(seed), "--require-gpu"]
+    if config.LOCAL_TRELLIS_TEX_RES:
+        cmd += ["--tex-res", str(config.LOCAL_TRELLIS_TEX_RES), "--atlas", "4096"]
     with GPU:
         free_comfy()
         t0 = time.time()

@@ -106,6 +106,9 @@ LOCAL_PICTURE_MODEL = "local/flux2-klein-4b"
 LOCAL_SEED_MODEL = "local/trellis2"
 LOCAL_TRELLIS_RES = int(os.environ.get("MASTERSMITH_LOCAL_TRELLIS_RES", "1024"))       # 512 is ~2x faster and softer
 LOCAL_TRELLIS_QUANT = os.environ.get("MASTERSMITH_LOCAL_TRELLIS_QUANT", "q8")           # q8 fits 12 GB; "" = f16, "q4"
+# texture volume: "" lets trellis.cpp pick (512 at res 1024), "1024" is sharper (a stippled grip survives) and ~3x
+# slower (485 s against 146 s on the pistol, 2026-09-27); the atlas then goes to 4096
+LOCAL_TRELLIS_TEX_RES = os.environ.get("MASTERSMITH_LOCAL_TRELLIS_TEX_RES", "")
 
 # --- spend. You run this against your own fal and OpenRouter keys; the ledger only keeps score of what they spent,
 # in cents. Nothing is charged, held or refused here.
