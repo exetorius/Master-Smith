@@ -368,7 +368,6 @@ if (args.get("spec") or {}).get("category") == "weapon":
 
 # ---------------------------------------------------------------- renders: previews, detail views, the check views
 blib.setup_render(int(args.get("render_size", 768)), 48, look="preview")
-scn.view_settings.exposure = -0.4        # a medium-grey polymer read nearly white under the studio light (2026-09-27)
 stage = blib.Stage(lod0, extra_hidden=[hull, lod1, lod2])
 report["renders"] = [stage.render(v, os.path.join(OUT, "preview_%s.png" % v))["file"] for v in ("iso", "side", "front")]
 stage.close()
