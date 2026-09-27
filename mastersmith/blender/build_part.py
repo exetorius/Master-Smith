@@ -39,7 +39,8 @@ def hex_rgb(h):
     lin = []
     for i in (0, 2, 4):
         c = int(h[i:i + 2], 16) / 255.0
-        lin.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+        c = max(c, 45 / 255.0)     # the darkest real paint or polymer; a black read off a shadowed photo is darker than
+        lin.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)   # any albedo (the pistol, 2026-09-27)
     return tuple(lin)
 
 
@@ -92,6 +93,15 @@ def box_render(part, view, path, size):
     cropped to the same box, any misfit in outline or proportion shows at once."""
     lo, hi = Vector((-L / 2, -W / 2, -H / 2)), Vector((L / 2, W / 2, H / 2))
     scn = bpy.context.scene
+    # in clay: the check is about shape, and a black slide rendered black hid its serrations from the builder
+    clay = bpy.data.materials.get("MS_clay") or bpy.data.materials.new("MS_clay")
+    cb = next(n for n in clay.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    cb.inputs["Base Color"].default_value = (0.55, 0.55, 0.55, 1)
+    cb.inputs["Roughness"].default_value = 0.5
+    cb.inputs["Metallic"].default_value = 0.0
+    own = [s.material for s in part.material_slots]
+    for s in part.material_slots:
+        s.material = clay
     cam = bpy.data.objects.new("BoxCam", bpy.data.cameras.new("BoxCam"))
     bpy.context.collection.objects.link(cam)
     scn.camera = cam
@@ -103,6 +113,8 @@ def box_render(part, view, path, size):
     bpy.ops.render.render(write_still=True)
     scn.render.film_transparent = False
     scn.render.image_settings.color_mode = "RGB"
+    for s, m in zip(part.material_slots, own):
+        s.material = m
     bpy.data.objects.remove(cam, do_unlink=True)
     return os.path.basename(path)
 

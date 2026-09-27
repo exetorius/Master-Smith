@@ -316,7 +316,7 @@ def _check(job, plan, out, report):
     work = os.path.join(job.work_dir, "check")
     os.makedirs(work, exist_ok=True)
     side_b = {p["name"]: p["side_box"] for p in plan["parts"]}
-    front_b = {p["name"]: p["front_span"] + [0, 100] for p in plan["parts"]}
+    front_b = {p["name"]: p["front_span"] + p["side_box"][2:] for p in plan["parts"]}   # each part at its own height
     views = [("left", plan["side"], side_b)] + ([("front", plan["front"], front_b)] if plan.get("front") else [])
     pics = []
     for view, src, boxes in views:
