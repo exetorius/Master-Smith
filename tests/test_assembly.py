@@ -71,6 +71,14 @@ def test_percent_boxes_become_metres_in_the_asset_frame():
     assert all(h - l >= 0.68 * 0.004 - 1e-9 for l, h in zip(lo, hi))
 
 
+def test_views_for_a_plan_fall_back_to_the_side_alone():
+    from mastersmith.stages.plan import pick_views
+    assert pick_views({"views": ["side", "muzzle", "mirror"]}, "weapon") == ("side", "muzzle", False)
+    assert pick_views({"views": ["side"]}, "weapon") == ("side", None, False)          # the muzzle view was refused
+    assert pick_views({"views": ["tq"], "seed_views": ["f", "l", "b", "r"]}, "vehicle") == ("l", "f", True)
+    assert pick_views({"views": ["tq"]}, "vehicle") is None and pick_views({"views": ["a", "b"]}, "prop") is None
+
+
 def test_plan_validation_cleans_names_methods_and_materials():
     dims = (0.68, 0.14, 0.27)
     raw = {"parts": [

@@ -43,6 +43,14 @@ Answer JSON only:
 Boxes of touching parts may overlap slightly where they join. Together the boxes must cover the whole silhouette."""
 
 
+NO_FRONT_FROM = """Picture 2 is the FRONT view (looking back at the forward end), cropped exactly to the object: the object's left is on
+the right of the picture. Both carry a grid in percent: 0 at the left / top edge, 100 at the right / bottom edge."""
+NO_FRONT_TO = """There is no front picture. The side picture carries a grid in percent: 0 at the left / top edge, 100 at the
+right / bottom edge. Estimate the widths from the description and how such objects are built: front_span is percent
+of the object's full width from its right side (0) to its left side (100). The width given above is only a guess;
+give your own as overall_width_m."""
+
+
 def foreground_box(path, threshold=0.08):
     """Pixel box (x0, y0, x1, y1) of whatever is not the backdrop (the median of the border)."""
     import numpy as np
@@ -192,6 +200,10 @@ def pick_views(ref, category):
     seed_views = list(ref.get("seed_views") or [])
     if category == "weapon" and len(views) >= 2:
         return views[0], views[1], False
+    if category == "weapon" and views:
+        # the muzzle view of a long gun often fails its check (the editor draws a side view into it; the shotgun of
+        # 2026-09-27 twice): plan from the side alone, the builder estimates the widths
+        return views[0], None, False
     if category in ("vehicle", "aircraft", "helicopter") and len(seed_views) >= 2:
         return seed_views[1], seed_views[0], True
     return None
@@ -221,17 +233,39 @@ def make_plan(job, spec, side_src, front_src, mirror_side=False):
     if front_is_left(job, side):
         Image.open(side).transpose(Image.FLIP_LEFT_RIGHT).save(side)
         job.log("  the side picture has the front on the left; mirrored so the front is on the right")
-    front_px = crop_to_object(front_src, front)
-    dims = object_dims(spec.size_m, side_px, front_px)
-    side_g, front_g = draw_grid(side, os.path.join(work, "side_grid.png")), draw_grid(front, os.path.join(work, "front_grid.png"))
-    prompt = PLAN_PROMPT.format(description=spec.description, category=spec.category, length_m=dims[0], height_m=dims[2],
-                                width_m=dims[1], max_parts=config.ASSEMBLY_MAX_PARTS)
+    side_g = draw_grid(side, os.path.join(work, "side_grid.png"))
+    if front_src:
+        front_px = crop_to_object(front_src, front)
+        dims = object_dims(spec.size_m, side_px, front_px)
+        front_g = draw_grid(front, os.path.join(work, "front_grid.png"))
+        pictures = [side_g, front_g]
+        prompt = PLAN_PROMPT
+    else:
+        front = front_g = None
+        dims = (float(spec.size_m), float(spec.size_m) * side_px[1] / float(side_px[0]) * 0.3,
+                float(spec.size_m) * side_px[1] / float(side_px[0]))            # provisional width until the builder says
+        pictures = [side_g]
+        prompt = PLAN_PROMPT.replace(NO_FRONT_FROM, NO_FRONT_TO).replace(
+            '"front_span": [y_left, y_right],                   percent of picture 2 across, tight around the part as seen from the front',
+            '"front_span": [y_left, y_right],                   your estimate, percent of the full width (a centred part is symmetric about 50)')
+        prompt = prompt.replace(' "notes": "anything the assembly must respect"}}',
+                                ' "overall_width_m": the object\'s full width in metres, "notes": "anything the assembly must respect"}}')
+    prompt = prompt.format(description=spec.description, category=spec.category, length_m=dims[0], height_m=dims[2],
+                           width_m=dims[1], max_parts=config.ASSEMBLY_MAX_PARTS)
     last = None
     for attempt in range(2):
         text = job.llm.vision(prompt + ("" if last is None else "\n\nThe previous answer was unusable: %s" % last),
-                              [side_g, front_g], model=config.BUILDER_MODEL, max_tokens=8000, effort="medium")
+                              pictures, model=config.BUILDER_MODEL, max_tokens=8000, effort="medium")
         try:
-            plan = validate_plan(extract_json(text), dims)
+            raw = extract_json(text)
+            if not front_src:
+                try:
+                    w = float((raw or {}).get("overall_width_m") or 0)
+                except (TypeError, ValueError):
+                    w = 0
+                if 0.02 * dims[0] < w < 1.5 * dims[0]:
+                    dims = (dims[0], w, dims[2])
+            plan = validate_plan(raw, dims)
             break
         except (ValueError, TypeError) as exc:
             last = str(exc)

@@ -167,15 +167,20 @@ def build_code_part(job, spec, part, plan):
     L, W, H = _size(part)
     zt, zb = part["side_box"][2], part["side_box"][3]
     side_sq = _box_square(plan["side"], part["side_box"], os.path.join(out_dir, "box_side.png"))
-    front_sq = _box_square(plan["front"], part["front_span"] + [zt, zb], os.path.join(out_dir, "box_front.png"))
     side_mm = _mm_scale(side_sq, os.path.join(out_dir, "box_side_mm.png"), max(L, H), ("x", "z"))
-    front_mm = _mm_scale(front_sq, os.path.join(out_dir, "box_front_mm.png"), max(W, H), ("y", "z"))
+    front_sq = front_mm = None
+    if plan.get("front"):
+        front_sq = _box_square(plan["front"], part["front_span"] + [zt, zb], os.path.join(out_dir, "box_front.png"))
+        front_mm = _mm_scale(front_sq, os.path.join(out_dir, "box_front_mm.png"), max(W, H), ("y", "z"))
     dims = plan.get("dims_m") or [L, W, H]
     big = L > 0.25 * dims[0] or H > 0.35 * dims[2]           # a housing or stock carries the look: think harder
     effort = "high" if big else "medium"
     prompt = CODE_PROMPT.format(category=spec.category, description=spec.description[:600], name=name, what=part["what"],
                                 L_mm=L * 1000, W_mm=W * 1000, H_mm=H * 1000, kit=codecheck.KIT_DOC)
-    messages = [{"role": "user", "content": [{"type": "text", "text": prompt}] + _images([side_mm, front_mm, side_crop])}]
+    if front_mm is None:
+        prompt = prompt.replace("Picture 2: the same from the FRONT (the part's left on the right of the picture): y across, z up, millimetres.\nPicture 3:",
+                                "There is no front picture: shape the cross-section (y) from the description and how such a part is made.\nPicture 2:")
+    messages = [{"role": "user", "content": [{"type": "text", "text": prompt}] + _images([p for p in (side_mm, front_mm, side_crop) if p])}]
     best, code = None, None
     for attempt in range(3):
         reply = job.llm.chat(messages, model=config.BUILDER_MODEL, max_tokens=12000 if big else 8000, temperature=0.2,
@@ -191,10 +196,14 @@ def build_code_part(job, spec, part, plan):
     if best is None:
         return None
     for round_no in range(2):                    # up to two corrections, each checked against the reference
-        cmp = _compare([(side_sq, os.path.join(out_dir, best["box_renders"]["left"])),
-                        (front_sq, os.path.join(out_dir, best["box_renders"]["front"]))],
-                       os.path.join(out_dir, "compare_%d.png" % round_no))
-        text = job.llm.vision(REFINE_PROMPT.format(name=name, what=part["what"], code=best["code"]), [cmp],
+        rows = [(side_sq, os.path.join(out_dir, best["box_renders"]["left"]))]
+        if front_sq:
+            rows.append((front_sq, os.path.join(out_dir, best["box_renders"]["front"])))
+        cmp = _compare(rows, os.path.join(out_dir, "compare_%d.png" % round_no))
+        refine = REFINE_PROMPT.format(name=name, what=part["what"], code=best["code"])
+        if not front_sq:
+            refine = "(There is no front picture: the comparison has only the SIDE row.)\n" + refine
+        text = job.llm.vision(refine, [cmp],
                               model=config.BUILDER_MODEL, max_tokens=12000 if big else 8000, effort=effort, json_only=False)
         if text.strip().upper().startswith("OK") or "```" not in text:
             job.log("  part %s: accepted by its own check after %d correction(s) (%d tris)" % (name, round_no, best.get("triangles", 0)))
@@ -305,16 +314,21 @@ def _check(job, plan, out, report):
     os.makedirs(work, exist_ok=True)
     side_b = {p["name"]: p["side_box"] for p in plan["parts"]}
     front_b = {p["name"]: p["front_span"] + [0, 100] for p in plan["parts"]}
+    views = [("left", plan["side"], side_b)] + ([("front", plan["front"], front_b)] if plan.get("front") else [])
     pics = []
-    for view, src, boxes in (("left", plan["side"], side_b), ("front", plan["front"], front_b)):
+    for view, src, boxes in views:
         pics.append(draw_grid(src, os.path.join(work, "ref_%s.png" % view), boxes=boxes))
-    for view, boxes in (("left", side_b), ("front", front_b)):
+    for view, _src, boxes in views:
         crop = os.path.join(work, "asm_%s.png" % view)
         crop_to_object(os.path.join(out, report["check_renders"][view]["file"]), crop)
         pics.append(draw_grid(crop, os.path.join(work, "asm_%s_grid.png" % view), boxes=boxes))
     listing = json.dumps([{"name": p["name"], "what": p["what"][:80], "side_box": p["side_box"], "front_span": p["front_span"]}
                           for p in plan["parts"]])
-    text = job.llm.vision(CHECK_PROMPT.format(parts=listing), pics, model=config.BUILDER_MODEL, max_tokens=4000, effort="medium")
+    prompt = CHECK_PROMPT.format(parts=listing)
+    if not plan.get("front"):
+        prompt = ("There is no front reference: picture 1 is the reference SIDE, picture 2 the assembly SIDE. Keep each "
+                  "part's front_span unless it is clearly wrong.\n") + prompt
+    text = job.llm.vision(prompt, pics, model=config.BUILDER_MODEL, max_tokens=4000, effort="medium")
     return extract_json(text) or {"ok": True, "notes": "no readable answer"}
 
 
