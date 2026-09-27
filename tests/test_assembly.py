@@ -260,3 +260,22 @@ def test_kit_mistakes_come_back_as_readable_errors():
             _blender("build_part.py", a)
             res = json.load(open(os.path.join(d, "parts", name + ".json")))
             assert not res["ok"] and words in res["error"], res.get("error")
+
+
+def test_the_body_picture_erases_only_code_parts_that_stick_out():
+    from PIL import Image, ImageDraw
+    from mastersmith.stages.assembly import erased_body_picture
+    with tempfile.TemporaryDirectory() as d:
+        im = Image.new("RGB", (1000, 400), (245, 245, 245))
+        dr = ImageDraw.Draw(im)
+        dr.rectangle((0, 100, 699, 399), fill=(90, 90, 90))       # the body
+        dr.rectangle((100, 60, 600, 99), fill=(20, 20, 20))       # a rail lying on it
+        dr.rectangle((700, 200, 999, 230), fill=(20, 20, 20))     # a barrel sticking out
+        im.save(os.path.join(d, "side.png"))
+        body = {"name": "Body", "method": "vendor", "side_box": [0, 70, 15, 100]}
+        plan = {"side": os.path.join(d, "side.png"), "parts": [
+            body, {"name": "Rail", "method": "code", "side_box": [10, 60, 15, 25]},
+            {"name": "Barrel", "method": "code", "side_box": [70, 100, 50, 58]}]}
+        path, erased = erased_body_picture(plan, body, os.path.join(d, "b.png"))
+        assert erased == ["Barrel"]
+        assert Image.open(path).size[0] == Image.open(path).size[1]

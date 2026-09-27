@@ -197,15 +197,38 @@ class Director:
             asked = any(w in str(last_user).lower() for w in ("single picture", "one picture", "one view", "single view", "just one"))
             base["multiview"] = not (wants_single and asked)
         a.pop("multiview", None)
+        adopt = a.pop("reference_job", None)          # approved pictures of an earlier picture job, reused as they are
         base.update({k: v for k, v in a.items() if v not in (None, "")})
         # the words in the brief decide the category (a helicopter filed as a prop loses its canopy and cockpit)
         from .brief import fix_category
         base["category"] = fix_category(base.get("category"), base.get("description"), base.get("name"), base.get("search_query"))
         self.spec = Spec.from_dict(base)
+        adopted = None
+        if adopt:
+            adopted = self._adopt_reference(str(adopt))
+            if "error" in adopted:
+                return adopted
         est = pricing.estimate(self.spec)
         out = {"brief": self.spec.to_dict(), "estimate_credits": est["credits"], "estimate_usd": est["usd"],
                "steps": [s for s, _ in est["steps"]]}
+        if adopted:
+            out["approved_pictures"] = adopted
         return {**out, **self._money(est["credits"])}
+
+    def _adopt_reference(self, job_dir):
+        """Take a finished picture job's approved pictures as this session's (a rebuild of the same design with another
+        vendor or build mode, without drawing it again). Only folders under the output directory."""
+        from .pipeline import load_reference
+        root = os.path.realpath(str(config.OUT_DIR))
+        path = os.path.realpath(job_dir if os.path.isabs(job_dir) else os.path.join(root, job_dir))
+        if os.path.commonpath([root, path]) != root:
+            return {"error": "reference_job must be a job folder under %s" % root}
+        try:
+            ref = load_reference(path)
+        except FileNotFoundError as exc:
+            return {"error": str(exc)}
+        self.reference = {"job_dir": path, "views": ref.get("views") or [], "for": self._design()}
+        return {"job_dir": path, "views": len(self.reference["views"])}
 
     def _money(self, needed=0):
         """What the director may say about money: the provider accounts, and what this instance has spent so far."""

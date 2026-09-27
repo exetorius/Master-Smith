@@ -66,8 +66,11 @@ def fit(o, p):
     bmin, bmax = Vector(p["box_min"]), Vector(p["box_max"])
     centre, size = (bmin + bmax) * 0.5, bmax - bmin
     if p["kind"] == "code":
+        g = float(p.get("cover") or 1.0)          # grown a little over the vendor body's soft copy of this part
+        if g != 1.0:
+            o.data.transform(Matrix.Diagonal(Vector((g, g, g, 1.0))))
         o.data.transform(Matrix.Translation(centre))
-        return {"scale": 1.0}
+        return {"scale": g}
     if p.get("yaw"):
         o.data.transform(Matrix.Rotation(math.radians(float(p["yaw"])), 4, "Z"))
     lo, hi = blib.dims(o)

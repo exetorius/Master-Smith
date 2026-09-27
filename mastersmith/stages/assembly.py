@@ -394,6 +394,14 @@ def _run_part(job, part, code, out_dir, tag):
     return res
 
 
+def _mostly_inside(p, q):
+    """More than half of p's side-view box lies inside q's."""
+    x0, x1, zt, zb = p["side_box"]
+    bx0, bx1, bzt, bzb = q["side_box"]
+    area = max(0.0, min(x1, bx1) - max(x0, bx0)) * max(0.0, min(zb, bzb) - max(zt, bzt))
+    return area > 0.5 * max(1e-9, (x1 - x0) * (zb - zt))
+
+
 def is_body(part, plan):
     """The vendor body: a vendor part spanning at least half the object's length."""
     return part.get("method") == "vendor" and (part["side_box"][1] - part["side_box"][0]) >= 50
@@ -420,6 +428,13 @@ def erased_body_picture(plan, part, dst, pad=0.08, tiny=5.0, grow=0.4):
             continue
         x0, x1, zt, zb = q["side_box"]
         if (x1 - x0) < tiny and (zb - zt) < tiny:
+            continue
+        # only parts that stick OUT of the body are erased (a barrel, a muzzle brake). A part lying on it (a rail on the
+        # receiver) stays: erasing its box took the receiver's top with it and the vendor textured the gap as backdrop
+        # (the white strip under the free bullpup's rail, 2026-09-27). The code part is built over the vendor's soft copy.
+        bx0, bx1, bzt, bzb = part["side_box"]
+        inside_area = max(0.0, min(x1, bx1) - max(x0, bx0)) * max(0.0, min(zb, bzb) - max(zt, bzt))
+        if inside_area > 0.5 * max(1e-9, (x1 - x0) * (zb - zt)):
             continue
         g = grow
         c0, c1 = max(0, int((x0 - g) / 100 * w)), min(w, int(np.ceil((x1 + g) / 100 * w)))
@@ -582,6 +597,8 @@ def _assemble(job, spec, plan, built, round_no, reference):
             continue
         entry = {"name": p["name"], "kind": "code" if b.get("code") else "vendor", "box_min": p["box_min"],
                  "box_max": p["box_max"], "material": p["material"]}
+        if b.get("code") and any(is_body(q, plan) and _mostly_inside(p, q) for q in plan["parts"]):
+            entry["cover"] = 1.03      # over the vendor body's own soft copy of it (kept in the body's picture)
         if b.get("code"):
             entry.update({"blend": b["blend"]} if b.get("blend") and os.path.exists(b["blend"]) else {"glb": b["glb"]})
         else:
