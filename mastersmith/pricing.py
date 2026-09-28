@@ -183,7 +183,7 @@ def estimate_assembly(spec):
         price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"})
     return [
         ("parts plan from the approved pictures (builder)", 2 * BUILDER_CALL_USD),
-        ("plan pictures sharpened 4x for the part builder (ESRGAN)", 2 * FAL_PRICES.get(config.UPSCALE_MODEL, 0.02)),
+        ("plan pictures sharpened 4x for the part builder (ESRGAN)", 0.0 if config.NO_SPEND else 2 * FAL_PRICES.get(config.UPSCALE_MODEL, 0.02)),
         ("code parts: modelled, built and self-checked (builder, up to %d parts)" % ASSEMBLY_CODE_PARTS,
          2.5 * (ASSEMBLY_BIG_PARTS * BUILDER_CALL_USD + (ASSEMBLY_CODE_PARTS - ASSEMBLY_BIG_PARTS) * BUILDER_SMALL_CALL_USD)),
         ("vendor parts: drawn alone and seeded (up to %d, %s)" % (ASSEMBLY_VENDOR_PARTS, vendor["label"] if vendor["key"].startswith("hitem3d3") or vendor["key"] == "local" else "Tripo H3.1"),
