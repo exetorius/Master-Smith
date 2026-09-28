@@ -728,6 +728,37 @@ def _check(job, plan, out, report):
     return extract_json(text) or {"ok": True, "notes": "no readable answer"}
 
 
+def keep_part_pictures(plan, built, delivery):
+    """Every part's pictures and its plan entry kept in delivery/parts/<Part>/ (side.png the picture the part is
+    registered to, quarter.png the one the mesher got, seed.glb the mesh it returned) with a meta.json, so the same
+    parts can be meshed again later with another vendor without drawing anything (owner, 2026-09-28:
+    "keep the parts images so we can test them later with a better model"). scripts/reseed_parts.py does that."""
+    import shutil
+    root = os.path.join(delivery, "parts")
+    index = []
+    for p in plan["parts"]:
+        b = built.get(p["name"]) or {}
+        d = os.path.join(root, p["name"])
+        os.makedirs(d, exist_ok=True)
+        meta = {k: p.get(k) for k in ("name", "what", "method", "side_box", "front_span", "box_min", "box_max", "material",
+                                      "zones", "centreline")}
+        meta["kind"] = "code" if b.get("code") else "vendor"
+        for key, src, dst in (("side_picture", b.get("side_picture") or (b.get("picture") if not b.get("side_picture") else None), "side.png"),
+                              ("picture", b.get("picture") if b.get("side_picture") else None, "quarter.png"),
+                              ("seed", b.get("seed"), "seed.glb")):
+            if src and os.path.exists(src):
+                shutil.copy2(src, os.path.join(d, dst))
+                meta[key] = dst
+        if b.get("code"):
+            meta["code"] = b["code"]
+        meta["registration"] = b.get("registration")
+        meta["keep_depth"] = bool(b.get("keep_depth"))
+        json.dump(meta, open(os.path.join(d, "meta.json"), "w"), indent=1)
+        index.append(p["name"])
+    json.dump({"dims_m": plan.get("dims_m"), "parts": index}, open(os.path.join(root, "index.json"), "w"), indent=1)
+    return index
+
+
 def seed_images(plan, built, delivery):
     """Every part's seed images into the delivery (seed_<Part>_<kind>.png), so the page shows how each part was made
     next to the model: for a vendor part the picture the mesher got, the side picture it was registered to and the raw
@@ -823,6 +854,7 @@ def build_assembly(job, spec, ref):
         job.stage("assemble")
     delivery, report = _assemble(job, spec, plan, built, "final", reference)
     report["seed_images"] = seed_images(plan, built, delivery)
+    report["kept_parts"] = keep_part_pictures(plan, built, delivery)
     report["assembly"] = record
     report["build_mode"] = "assembly"
     with open(os.path.join(delivery, "report.json"), "w") as f:
