@@ -21,37 +21,35 @@ Picture 1 is the SIDE view, cropped exactly to the object: the forward end (muzz
 Picture 2 is the FRONT view (looking back at the forward end), cropped exactly to the object: the object's left is on
 the right of the picture. Both carry a grid in percent: 0 at the left / top edge, 100 at the right / bottom edge.
 
-Split the object into a vendor body and the few parts that code builds better (between 2 and {max_parts} parts). No
+Split the object the way a 3D modeller would: into every piece that is its own shape (between 4 and {max_parts}
+parts) - receiver, stock, grip, handguard, magazine, each sight, rails, barrel, muzzle device, trigger group, levers,
+pods, canopy frame, hull sections, wheels, mirrors, bumpers. Small parts are built well; one big part is not. No
 decals, no text, no screws smaller than 1% of the length.
 
 Keep together what is ONE moulding or casting in reality: a polymer pistol frame WITH its grip and trigger guard,
-a rifle stock with its pistol grip, a vehicle's one-piece body shell. A cut through the middle of one moulding
-becomes a visible seam or gap when the halves are built apart.
+a bullpup stock that is moulded with its receiver, a vehicle's one-piece body shell. A cut through the middle of
+one moulding becomes a visible seam or gap when the halves are built apart. Everything that is bolted, clipped or
+slid onto that moulding is its own part.
 
-For each part choose how it is built. The vendor models almost everything; code only what it makes perfectly:
-- "code" ONLY for these, and only when they are clearly visible:
-  * turned (lathe) parts, round in cross-section: barrels, muzzle brakes, flash hiders, suppressors, gas blocks,
-    round knobs and bolt handles, exhaust tips, round lenses' housings, wheel hubs
-  * repeated machined parts: Picatinny / M-LOK rails, rail covers with regular slots, cooling-fin stacks
-  * small hardware: exposed pins, screw heads and rivets that matter at game distance
-  * controls that stick out SIDEWAYS on one side only: a charging handle, a selector lever, a bolt or magazine release,
-    a side knob. The vendor sees one side and mirrors them onto the other (the bullpup came out with its charging
-    handle on both sides), so code builds them on the right side only
-  Code parts are modelled in code from primitives; everything irregular, moulded, curved or busy with small features
-  comes out better from the vendor.
-- "vendor": an AI image-to-3D model. EVERYTHING else is ONE vendor part, the body: the housing or receiver, stock,
-  grip, trigger and guard, handguard with its vents, sights, magazine, levers, cheek rest, slide, panels - drawn as the
-  whole object WITHOUT the code parts. In its "what", describe it and list the parts it is drawn WITHOUT ("the
-  bullpup body with its sights, magazine and handguard, without the barrel, muzzle brake and rails"). Give it the
-  colour of its largest area; if it shows clearly different colours (an olive panel on a grey body), set
-  "keep_texture": true in its material so the vendor's own colours are kept.
-  NEVER a second vendor part: a vehicle's wheels and tyres are part of the body (give the tyres a "rubber" zone and the
-  wheels a "metal" one); four tyres drawn alone came back as one black blob under the truck (2026-09-28).
-A typical weapon: one vendor body plus a barrel, a muzzle device and a rail or two in code. A typical vehicle: one
-vendor body (with its wheels) plus code exhaust tips, mirrors, tow hooks, antennas and light lenses; the windows and
-windshield are "glass" zones of the body. An aircraft or helicopter: one vendor body plus code guns, gun barrels,
-antennas, pitot tubes and boxy pods with repeated ports (rocket pods, grilles); its canopy and windows are ALWAYS a
-"glass" zone of the body (the Havoc's canopy came out as painted hull, 2026-09-28).
+For each part choose how it is built - by what the part IS, not by how big it is:
+- "code": modelled in code from primitives with exact edges. Use it for every part that IS a primitive shape or a
+  stack of them: turned parts (barrels, muzzle devices, suppressors, gas blocks, knobs, exhaust tips, wheel hubs, a
+  wheel with its tyre - a lathe shape with a tread repeated round it), repeated machined parts (Picatinny / M-LOK
+  rails, slotted covers, fin stacks, grilles, rocket-pod faces), flat or faceted panels and plates, boxes with cuts
+  (a magazine, a butt pad, a mirror head, a bumper with tow hooks, a rocket pod), rods and tubes, and every control
+  that sticks out sideways on ONE side only (a charging handle, a selector, a release button - the mesher would
+  mirror it onto both sides).
+- "vendor": an AI image-to-3D model of that ONE part, drawn alone. Use it for every part with sculpted, moulded or
+  compound-curved surfaces that primitives cannot describe: a pistol grip with finger grooves, a moulded stock and
+  receiver, a shaped handguard shell, a slide with its contours, a helicopter hull section, a canopy, a fender. The
+  vendor is free on this PC, so use it for every such part - never lump several parts into one vendor part
+  (four tyres drawn together came back as one black blob), and never send a primitive shape to it.
+For a vendor part, "what" describes that part alone as it looks in the picture and names the neighbours it is drawn
+WITHOUT. Give it the colour of its largest area; if it shows clearly different colours, set "keep_texture": true.
+Windows, windshields and canopies are "glass" zones of the vendor part that carries them, or, when the glass is a
+separate pane, a code part with "glass": true.
+A typical rifle is 10-16 parts, a pistol 6-10, a truck 12-20 (body shell, hood, bed, doors if separate, each wheel,
+bumpers, mirrors, lights), an aircraft 8-14 (hull, canopy, engines, pods, guns, skids or gear, tail).
 
 Answer JSON only:
 {{"parts": [{{"name": "PascalCase unique", "what": "one sentence: shape, features to model, colour and finish",

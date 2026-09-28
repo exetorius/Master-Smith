@@ -477,16 +477,11 @@ def build_vendor_part(job, spec, part, plan):
               and all(min(q["box_max"][i], part["box_max"][i]) - max(q["box_min"][i], part["box_min"][i]) > 0 for i in range(3))]
     leave_out = (" Leave out, they are modelled separately: %s." % ", ".join(others)) if others else ""
     register_to, yaw_sweep = None, False
-    if is_body(part, plan):
+    body = is_body(part, plan)
+    if body:
         picture, erased = erased_body_picture(plan, part, os.path.join(out_dir, "picture_erased.png"))
         job.log("  part %s: the approved side picture with the code parts erased (%s)" % (name, ", ".join(erased) or "none"))
-        view = config.BODY_SEED_VIEW or ("side" if pricing.edit_model(spec).startswith("local/") else "three_quarter")
-        if view == "three_quarter":
-            quarter = _three_quarter(job, spec, part, plan, picture, erased, out_dir)
-            if quarter:
-                # the mesher gets depth from the three-quarter picture; the side picture still decides where it sits
-                register_to, yaw_sweep, picture = picture, True, quarter
-    for attempt in range(0 if picture else 2):
+    for attempt in range(0 if picture else 2):      # a side picture of the part alone, for the parts that are not the body
         path = os.path.join(out_dir, "picture_%d.png" % attempt)
         # the SAME side view as the reference (forward to the right): its silhouette is what the seed is registered to
         job.images.generate("Show ONLY %s from this exact object, whole and complete, exactly as it looks here (same shape, "
@@ -499,6 +494,13 @@ def build_vendor_part(job, spec, part, plan):
             picture = path
             break
         fixes, picture = str(j.get("fixes") or ""), picture or path
+    view = config.BODY_SEED_VIEW or ("side" if pricing.edit_model(spec).startswith("local/") else "three_quarter")
+    if picture and view == "three_quarter":
+        # every vendor part, not only a body: a flat side picture gives the mesher no depth. The side picture still
+        # decides where and how the part sits (registration with a yaw sweep).
+        quarter = _three_quarter(job, spec, part, plan, picture, erased if body else [], out_dir, body=body)
+        if quarter:
+            register_to, yaw_sweep, picture = picture, True, quarter
     url = job.fal.upload(picture)
     vendor = pricing.seed_vendor(spec)["key"]
     if vendor.startswith("hitem3d3"):
@@ -539,14 +541,14 @@ same scale, straight lines stay straight. The whole object in frame, isolated on
 studio light, sharp product photograph, no shadows on the ground.%s"""
 
 
-def _three_quarter(job, spec, part, plan, side_picture, erased, out_dir):
+def _three_quarter(job, spec, part, plan, side_picture, erased, out_dir, body=True):
     """The body drawn from a three-quarter angle by the picture model, from its erased side picture (and the approved
     front view when there is one): an image-to-3D model given a flat side profile has to guess all the depth (the
     bullpup came out thin, 2026-09-27). Checked like any part picture; None when no good picture came."""
     refs = [side_picture] + ([plan["front"]] if plan.get("front") else [])
     # every part code builds is left out of the drawing (tiny pins and screws aside): what the mesher does not see it
     # cannot mirror onto the hidden side or model twice
-    code = [q for q in plan["parts"] if q.get("method") == "code"
+    code = [q for q in plan["parts"] if body and q.get("method") == "code"
             and not ((q["side_box"][1] - q["side_box"][0]) < 5 and (q["side_box"][3] - q["side_box"][2]) < 5)]
     leave = ["%s (%s)" % (q["name"], q["what"].split(",")[0].split(";")[0][:80]) for q in code]
     missing = (" Leave OUT these parts, they are made separately - draw the object without them, with a clean surface "

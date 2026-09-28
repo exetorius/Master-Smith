@@ -174,7 +174,7 @@ BUILDER_CALL_USD = 0.0 if FREE_LLM else 0.30         # one builder call with pic
 BUILDER_SMALL_CALL_USD = 0.0 if FREE_LLM else 0.08   # one call of the cheaper builder for a small part
 ASSEMBLY_CODE_PARTS = 10            # the worst case reserves this many code parts at 2.5 builder calls each
 ASSEMBLY_BIG_PARTS = 3              # of which this many are big enough for the main builder
-ASSEMBLY_VENDOR_PARTS = 3
+ASSEMBLY_VENDOR_PARTS = 12 if config.NO_SPEND else 3     # free on this PC: a modeller's split, many small parts
 
 
 def estimate_assembly(spec):
