@@ -45,10 +45,11 @@ For each part choose how it is built. The vendor models almost everything; code 
   bullpup body with its sights, magazine and handguard, without the barrel, muzzle brake and rails"). Give it the
   colour of its largest area; if it shows clearly different colours (an olive panel on a grey body), set
   "keep_texture": true in its material so the vendor's own colours are kept.
-  A second vendor part only for a large separate piece of a different material that would confuse one picture
-  (a vehicle's tyres, a sling).
+  NEVER a second vendor part: a vehicle's wheels and tyres are part of the body (give the tyres a "rubber" zone and the
+  wheels a "metal" one); four tyres drawn alone came back as one black blob under the truck (2026-09-28).
 A typical weapon: one vendor body plus a barrel, a muzzle device and a rail or two in code. A typical vehicle: one
-vendor body plus code wheel hubs and exhaust tips.
+vendor body (with its wheels) plus code exhaust tips, mirrors, tow hooks, antennas and light lenses; the windows and
+windshield are "glass" zones of the body.
 
 Answer JSON only:
 {{"parts": [{{"name": "PascalCase unique", "what": "one sentence: shape, features to model, colour and finish",

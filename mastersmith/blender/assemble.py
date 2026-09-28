@@ -458,6 +458,34 @@ def split_zones(o, zones):
     return out
 
 
+def glass_zone(mats):
+    """A vendor body's window or canopy area as smoked glass in the baked atlas: the vendor's own colour darkened and
+    desaturated, no roughness or metal, a mirror-smooth finish. The atlas cannot carry transparency, so this is the
+    look of tinted glass seen from outside (the aircraft skill's rule)."""
+    for m in mats:
+        t = m.node_tree
+        b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if b is None:
+            continue
+        base = b.inputs["Base Color"]
+        if base.is_linked:
+            src = base.links[0].from_socket
+            hsv = t.nodes.new("ShaderNodeHueSaturation")
+            hsv.inputs["Saturation"].default_value = 0.5
+            hsv.inputs["Value"].default_value = 0.45
+            t.links.new(src, hsv.inputs["Color"])
+            t.links.new(hsv.outputs["Color"], base)
+        else:
+            base.default_value = (0.05, 0.07, 0.09, 1.0)
+        for name, v in (("Roughness", 0.05), ("Metallic", 0.0)):
+            inp = b.inputs[name]
+            for l in list(inp.links):
+                t.links.remove(l)
+            inp.default_value = v
+        if "Specular IOR Level" in b.inputs:
+            b.inputs["Specular IOR Level"].default_value = 0.8
+
+
 def surface_to_plan(o, mat, mats=None):
     """A vendor part takes its planned roughness and metalness too: Tripo's maps made the bullpup's polymer body shine
     like metal (2026-09-27). The texture's roughness variation is kept, squeezed into planned +-0.1."""
@@ -510,6 +538,9 @@ for p in args["parts"]:
             rec["surface_detail"] = surface_detail(o, pm, mats=rest)
         for z, mats in zoned:
             zm = z.get("material") or {}
+            if zm.get("glass") or zm.get("finish") == "glass":
+                glass_zone(mats)                   # smooth tinted glass; the wear pass turned a windshield to snow
+                continue
             tint_to_plan(o, zm.get("color"), mats, metal=bool(zm.get("metal")))
             surface_to_plan(o, zm, mats)
             if args.get("surface_detail", True):
