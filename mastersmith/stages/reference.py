@@ -195,11 +195,20 @@ def _orthographic_views(job, skill, primary):
                     path, ok = mp, True
                     break
         if not ok:
+            from ..spec import assembly_wanted
+            if key == "back" and assembly_wanted(job.spec):
+                # an assembly plans from the side and the front only: a rejected back view (the Havoc's, 2026-09-28)
+                # must not throw away the two it needs. The last attempt stands in, marked so nothing seeds from it.
+                job.log("  orthographic back view rejected twice (%s); the assembly does not need it" % fixes[:90])
+                got[key] = path
+                got["_back_unchecked"] = True
+                continue
             job.log("  orthographic %s view rejected twice (%s); seeding from one picture" % (key, fixes[:90]))
             return None
         got[key] = path
+    back_ok = not got.pop("_back_unchecked", False)
     asp = {k: _foreground_aspect(p) for k, p in got.items()}
-    if None in asp.values() or not (asp["front"] < 0.85 * asp["left"] and asp["back"] < 0.85 * asp["left"]):
+    if None in asp.values() or not (asp["front"] < 0.85 * asp["left"] and (not back_ok or asp["back"] < 0.85 * asp["left"])):
         job.log("  orthographic views inconsistent (aspect front %.2f left %.2f back %.2f); seeding from one picture" % (
             asp.get("front") or 0, asp.get("left") or 0, asp.get("back") or 0))
         return None
