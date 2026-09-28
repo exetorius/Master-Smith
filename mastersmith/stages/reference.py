@@ -83,7 +83,12 @@ def _source_pictures(job):
 
 
 def _cutout(job, source, path):
-    """A source photograph the editor refused: cut it out on white and seed from it as it is (fal birefnet)."""
+    """A source photograph the editor refused: cut it out on white and seed from it as it is (fal birefnet, or the
+    BiRefNet that ships with TRELLIS on this PC when nothing may be spent)."""
+    if config.NO_SPEND:
+        from .. import local
+        local.cutout(source, path)
+        return path
     src_url = source if source.startswith(("http://", "https://")) else job.fal.upload(source)
     cut = job.fal.run(config.CUTOUT_MODEL, {"image_url": src_url, "operating_resolution": "2048x2048",
                                             "output_format": "png", "refine_foreground": True})

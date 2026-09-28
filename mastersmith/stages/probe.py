@@ -36,6 +36,9 @@ def decide_facing(job, skill, probe):
 
 def _sam(job, image_path, prompt, max_masks=6, min_score=0.4):
     """SAM 3 wants a descriptive noun phrase: 'the upper metal slide of the pistol' is found, 'slide' is not (2026-09-17)."""
+    if config.NO_SPEND:
+        job.log("  %s: no masks (SAM 3 is paid; MASTERSMITH_NO_SPEND=1)" % prompt[:40])
+        return []
     url = job.fal.upload(image_path)
     out = job.fal.run("fal-ai/sam-3/image", {"image_url": url, "prompt": prompt, "apply_mask": False,
                                              "return_multiple_masks": True, "max_masks": max_masks,

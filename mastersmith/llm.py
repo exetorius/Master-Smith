@@ -1,4 +1,5 @@
-"""OpenRouter chat completions with tool calling and per-call cost capture (usage.cost)."""
+"""OpenRouter chat completions with tool calling and per-call cost capture (usage.cost); or, with MASTERSMITH_LLM set,
+the same calls answered by Claude Code or Codex on this PC (llm_cli.py)."""
 import base64
 import json
 import time
@@ -19,8 +20,13 @@ class LLMError(Exception):
 class LLM:
     def __init__(self, key=None, log=print):
         self.key = key or os.environ.get("OPENROUTER_API_KEY", "")
-        if not self.key:
-            raise LLMError("OPENROUTER_API_KEY is not set (put it in .env)")
+        if config.LLM_BACKEND == "openrouter":
+            if config.NO_SPEND:
+                raise LLMError("MASTERSMITH_NO_SPEND=1 refuses OpenRouter: set MASTERSMITH_LLM=claude-code or codex")
+            if not self.key:
+                raise LLMError("OPENROUTER_API_KEY is not set (put it in .env)")
+        elif config.LLM_BACKEND not in ("claude-code", "codex"):
+            raise LLMError("MASTERSMITH_LLM must be openrouter, claude-code or codex, not %r" % config.LLM_BACKEND)
         self.log = log
         self.calls = []
         self.stage = ""                  # the pipeline names the stage; every call carries it for the cost breakdown
@@ -31,6 +37,15 @@ class LLM:
         Reasoning models spend their thinking INSIDE max_tokens: Gemini 3.8 Flash used 477 of a 500-token
         budget on reasoning and cut the JSON answer off mid-word (2026-09-16). Effort is pinned low - the
         director fills a form and the checker answers yes/no questions - and JSON answers are requested as such."""
+        if config.LLM_BACKEND != "openrouter":
+            from . import llm_cli
+            try:
+                msg, rec = llm_cli.chat(messages, model or config.DIRECTOR_MODEL, tools=tools, json_only=json_only,
+                                        effort=effort, log=self.log)
+            except llm_cli.CLIError as exc:
+                raise LLMError(str(exc))
+            self.calls.append({**rec, "stage": self.stage})
+            return msg
         body = {"model": model or config.DIRECTOR_MODEL, "messages": messages, "max_tokens": max_tokens,
                 "temperature": temperature, "usage": {"include": True}, "reasoning": {"effort": effort}}
         if json_only:

@@ -70,6 +70,15 @@ go to OpenRouter. The models live outside the repository (`MASTERSMITH_LOCAL_MOD
 set up with its own README); ComfyUI starts on first use. Expect a softer mesh than Tripo and looser prompt
 following than Nano Banana: it is for drafts and for working on the pipeline without spending.
 
+### No spending: Claude Code or Codex instead of OpenRouter
+
+Set `MASTERSMITH_LLM=claude-code` (or `codex`) and every model call (the director's chat, the parts plan, the part
+code, the checks, the review) is answered by that CLI on this PC, on your own subscription, at $0 a call. Add
+`MASTERSMITH_NO_SPEND=1` and nothing paid runs at all: pictures and meshes come from the free tier above, a paid fal
+or OpenRouter call is refused before it is made, and paid-only steps (rigging, texture tiles, glass masks) are
+skipped. Run Master Smith natively (`python -m mastersmith serve` and `npm run dev` in `web/`): the CLIs and the GPU
+models live on this PC, not in the container.
+
 Aircraft and helicopters get a glass canopy slot by default; the seed's own interior shows through it.
 
 ### Changing a build

@@ -212,6 +212,30 @@ def trellis(image, glb_path, res=None, seed=42, log=print, timeout=2400):
     return secs
 
 
+def cutout(image, dst, timeout=600):
+    """The object cut out on white with the BiRefNet that ships with TRELLIS (trellis-cli --bg-only), free."""
+    from PIL import Image
+    root = config.LOCAL_MODELS_DIR
+    exe = root / "trellis" / "trellis-cli.exe"
+    models = root / "models" / "trellis2" / config.LOCAL_TRELLIS_QUANT if config.LOCAL_TRELLIS_QUANT else root / "models" / "trellis2"
+    work = tempfile.mkdtemp(prefix="ms_cut_")
+    try:
+        out = os.path.join(work, "cut.glb")
+        with GPU:
+            p = subprocess.run([str(exe), str(image), out, "--models", str(models), "--bg-only", "--birefnet"],
+                               capture_output=True, text=True, timeout=timeout, errors="replace")
+        cut = next((os.path.join(work, f) for f in os.listdir(work) if f.lower().endswith(".png")), None)
+        if p.returncode != 0 or not cut:
+            raise LocalError("background removal failed: %s" % (p.stderr or p.stdout)[-400:])
+        im = Image.open(cut).convert("RGBA")
+        flat = Image.new("RGB", im.size, (255, 255, 255))
+        flat.paste(im, mask=im.split()[3])
+        flat.save(dst)
+        return dst
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def seed_output(glb_path):
     """A fal-shaped answer for a local mesh, so make_seed and the assembly read it like any vendor's."""
     return {"model_mesh": {"url": "file:///" + os.path.abspath(glb_path).replace("\\", "/")}}

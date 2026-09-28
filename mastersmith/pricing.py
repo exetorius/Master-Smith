@@ -91,11 +91,15 @@ def picture_catalogue():
 
 def edit_model(spec=None):
     """The picture model for edits and extra views: the build's choice, else the configured editor."""
+    if config.NO_SPEND:
+        return config.LOCAL_PICTURE_MODEL
     chosen = getattr(spec, "picture_model", None) if spec is not None else None
     return chosen if chosen in IMAGE_PRICES else config.EDIT_MODEL
 
 
 def concept_model(spec):
+    if config.NO_SPEND:
+        return config.LOCAL_PICTURE_MODEL
     chosen = getattr(spec, "picture_model", None)
     if chosen in IMAGE_PRICES:
         return chosen                                   # the customer's pick wins over the category rules
@@ -121,7 +125,8 @@ def price(model, payload=None):
 
 
 # A generous per-call allowance for the director/vision LLM; settled to the real usage.cost after.
-LLM_CALL_ALLOWANCE_USD = 0.03
+FREE_LLM = config.LLM_BACKEND != "openrouter"   # Claude Code / Codex on the owner's subscription: $0 a call
+LLM_CALL_ALLOWANCE_USD = 0.0 if FREE_LLM else 0.03
 
 
 # The mesh vendors a build can pick (Spec.seed_vendor; empty = the default). Shown in the chat's model selector.
@@ -146,6 +151,8 @@ SEED_VENDORS = [
 def seed_vendor(spec):
     """The catalogue row a spec's seed will come from."""
     key = (getattr(spec, "seed_vendor", None) or os.environ.get("MASTERSMITH_SEED_MODEL", "") or "tripo").strip().lower()
+    if config.NO_SPEND:
+        key = "local"                                   # TRELLIS.2 on this PC
     return next((v for v in SEED_VENDORS if v["key"] == key), SEED_VENDORS[0])
 
 
@@ -161,8 +168,8 @@ def vendor_catalogue():
 
 
 # Assembly builds: what the builder model's calls and the vendor parts cost at most. Settled to actual usage.cost.
-BUILDER_CALL_USD = 0.30             # one builder call with pictures (plan, big part code, checks)
-BUILDER_SMALL_CALL_USD = 0.08       # one call of the cheaper builder for a small part
+BUILDER_CALL_USD = 0.0 if FREE_LLM else 0.30         # one builder call with pictures (plan, big part code, checks)
+BUILDER_SMALL_CALL_USD = 0.0 if FREE_LLM else 0.08   # one call of the cheaper builder for a small part
 ASSEMBLY_CODE_PARTS = 10            # the worst case reserves this many code parts at 2.5 builder calls each
 ASSEMBLY_BIG_PARTS = 3              # of which this many are big enough for the main builder
 ASSEMBLY_VENDOR_PARTS = 3

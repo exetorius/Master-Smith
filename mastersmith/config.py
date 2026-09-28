@@ -46,6 +46,15 @@ CORS_ORIGINS = [o.strip() for o in os.environ.get(
     "MASTERSMITH_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
 
 # --- LLMs (OpenRouter ids). The director runs the chat and decides; it is cheap on purpose.
+# Who answers the model calls (director, plan, part code, checks, review): "openrouter" (pay per call), or a coding
+# agent on this PC on the owner's own subscription: "claude-code" (`claude -p`) or "codex" (`codex exec`).
+LLM_BACKEND = os.environ.get("MASTERSMITH_LLM", "openrouter").strip().lower()
+CLAUDE_CODE_MODEL = os.environ.get("MASTERSMITH_CLAUDE_MODEL", "")          # forces one alias for every call
+CLAUDE_CODE_DEFAULT = os.environ.get("MASTERSMITH_CLAUDE_DEFAULT", "sonnet")  # for non-Claude ids (Gemini checks)
+CODEX_MODEL = os.environ.get("MASTERSMITH_CODEX_MODEL", "")                 # empty = Codex's own default
+# No spending at all: every paid fal / OpenRouter call is refused before it is made, pictures and meshes run on this
+# PC (local/ ids), the model calls need a CLI backend, and paid-only steps (rigging, texture tiles) are skipped.
+NO_SPEND = os.environ.get("MASTERSMITH_NO_SPEND", "0") == "1"
 DIRECTOR_MODEL = os.environ.get("MASTERSMITH_DIRECTOR_MODEL", "google/gemini-3.8-flash")
 VISION_MODEL = os.environ.get("MASTERSMITH_VISION_MODEL", "google/gemini-3.8-flash")
 PREMIUM_MODEL = os.environ.get("MASTERSMITH_PREMIUM_MODEL", "anthropic/claude-sonnet-5")

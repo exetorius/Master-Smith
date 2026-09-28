@@ -560,6 +560,14 @@ def _sharpen(job, src, dst):
     """The picture upscaled 4x with the framing unchanged, so a small part's box crop shows its real edges instead of a
     blurred enlargement (a pistol trigger is ~100 px in a 1200 px reference). None when the upscale fails or changes
     the framing: the part builder then uses the picture as it is."""
+    if config.NO_SPEND:
+        # no paid upscale: a 4x Lanczos enlargement with a light unsharp mask keeps the framing and softens the jaggies
+        from PIL import ImageFilter
+        im = Image.open(src).convert("RGB")
+        im.resize((im.width * 4, im.height * 4), Image.LANCZOS).filter(
+            ImageFilter.UnsharpMask(radius=2, percent=80, threshold=2)).save(dst)
+        job.log("  plan picture enlarged 4x on this PC (no-spend)")
+        return dst
     try:
         out = job.fal.run(config.UPSCALE_MODEL, {"image_url": job.fal.upload(src), "scale": 4,
                                                  "model": "RealESRGAN_x4plus", "output_format": "png"})

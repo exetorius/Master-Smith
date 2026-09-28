@@ -131,6 +131,8 @@ class Images:
     def generate(self, prompt, path, model=None, references=(), aspect_ratio="4:3", resolution=None, timeout=300):
         """One PNG at `path`. `references`: local paths or URLs the picture must follow (an edit)."""
         model = model or config.CONCEPT_MODEL
+        if config.NO_SPEND and not model.startswith("local/"):
+            model = config.LOCAL_PICTURE_MODEL           # FLUX.2 klein on this PC
         refs = [r for r in (references or []) if r]
         if model.startswith("fal-ai/"):
             return self._generate_fal(prompt, path, model, refs, aspect_ratio, resolution)

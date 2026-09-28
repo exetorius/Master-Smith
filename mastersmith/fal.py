@@ -8,6 +8,7 @@ import time
 
 import requests
 
+from . import config
 from .pricing import price
 
 QUEUE = "https://queue.fal.run"
@@ -48,6 +49,8 @@ class Fal:
         usd = price(model, payload)          # refuses unpriced endpoints before any money moves
         if model.startswith("local/"):
             return self._run_local(model, payload, usd)
+        if config.NO_SPEND:
+            raise FalError("MASTERSMITH_NO_SPEND=1: the paid call %s was refused (nothing was spent)" % model, 402)
         t0 = time.time()
         r = self._retry(lambda: self.http.post("%s/%s" % (QUEUE, model), headers=self._h(),
                                                data=json.dumps(payload), timeout=60))
@@ -100,6 +103,10 @@ class Fal:
         return local.seed_output(glb)
 
     def upload(self, path, mime=None):
+        if config.NO_SPEND:                  # the local models read files: no fal storage, no fal key needed
+            url = "file:///" + os.path.abspath(path).replace("\\", "/")
+            self.uploads[url] = os.path.abspath(path)
+            return url
         low = str(path).lower()
         mime = mime or ("image/png" if low.endswith(".png") else "image/jpeg" if low.endswith((".jpg", ".jpeg"))
                         else "image/webp" if low.endswith(".webp") else "model/gltf-binary")

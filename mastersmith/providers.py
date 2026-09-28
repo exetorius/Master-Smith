@@ -8,6 +8,8 @@ import time
 
 import requests
 
+from . import config
+
 FAL_BALANCE = "https://rest.alpha.fal.ai/billing/user_balance"
 OPENROUTER_CREDITS = "https://openrouter.ai/api/v1/credits"
 OPENROUTER_KEY = "https://openrouter.ai/api/v1/auth/key"
@@ -115,6 +117,8 @@ class ProviderBalanceLow(Exception):
 def check_affordable(needed_usd, data=None):
     """Raise ProviderBalanceLow when a KNOWN balance is below the worst case. Unknown balances never block:
     a provider outage must not stop a build the money would cover."""
+    if config.NO_SPEND:
+        return data or {}                      # nothing will be spent: no balance can stop the build
     data = data or balances()
     for name in ("fal", "openrouter"):
         v = data.get(name)
