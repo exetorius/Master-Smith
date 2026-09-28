@@ -464,20 +464,29 @@ def split_zones(o, zones):
         return []
     base = [sl.material for sl in o.material_slots]
     out = []
-    # face adjacency (shared vertices), to smooth a zone's ragged box edge by neighbour majority
-    vert_faces = {}
-    for f in me.polygons:
-        for v in f.vertices:
-            vert_faces.setdefault(v, []).append(f.index)
-    neigh = [set() for _ in range(n)]
-    for f in me.polygons:
-        for v in f.vertices:
-            neigh[f.index].update(vert_faces[v])
+    # face adjacency (shared vertices), to smooth a zone's ragged box edge by neighbour majority. Built in numpy
+    # (Blender's Python has no scipy): every pair of faces meeting at a vertex, made unique, then a vote is a
+    # bincount instead of a Python loop over 150k faces (issue #6).
+    loop_total = np.empty(n, np.int64)
+    me.polygons.foreach_get("loop_total", loop_total)
+    loop_vert = np.empty(len(me.loops), np.int64)
+    me.loops.foreach_get("vertex_index", loop_vert)
+    face_of_loop = np.repeat(np.arange(n, dtype=np.int64), loop_total)
+    order = np.argsort(loop_vert, kind="stable")
+    fs = face_of_loop[order]                          # faces grouped by the vertex they meet at
+    _, start, k = np.unique(loop_vert[order], return_index=True, return_counts=True)
+    k_e = np.repeat(k, k)                             # each corner's group size
+    start_e = np.repeat(start, k)
+    rep = np.repeat(np.arange(len(fs)), k_e)          # each corner repeated once per face in its group
+    within = np.arange(len(rep)) - np.repeat(np.cumsum(k_e) - k_e, k_e)
+    pairs = np.unique(fs[rep] * n + fs[np.repeat(start_e, k_e) + within])
+    face_a, face_b = pairs // n, pairs % n
+    degree = np.bincount(face_a, minlength=n).astype(np.float32)
     for z in zones:
         lo, hi = np.array(z["box_min"]), np.array(z["box_max"])
         inside = np.all((centres >= lo) & (centres <= hi), axis=1)
         for _ in range(2):
-            votes = np.array([inside[list(neigh[i])].mean() if neigh[i] else inside[i] for i in range(n)])
+            votes = np.bincount(face_a, weights=inside[face_b].astype(np.float32), minlength=n) / np.maximum(degree, 1.0)
             inside = votes > 0.5
         if inside.sum() < 20:
             continue
@@ -818,7 +827,11 @@ def align_to_body(parts, specs):
     co = np.empty(len(body.data.vertices) * 3, np.float32)
     body.data.vertices.foreach_get("co", co)
     co = co.reshape(-1, 3)
-    faces = [tuple(pl.vertices) for pl in body.data.polygons]
+    # the body's faces as triangles, read in one call (issue #6)
+    body.data.calc_loop_triangles()
+    tri = np.empty(len(body.data.loop_triangles) * 3, np.int32)
+    body.data.loop_triangles.foreach_get("vertices", tri)
+    faces = tri.reshape(-1, 3).tolist()
     # the part that enters the body: the rearmost centreline part (a barrel before its muzzle device)
     lead = min(line, key=lambda t: blib.dims(t[0])[0].x)[0]
     lo, hi = blib.dims(lead)

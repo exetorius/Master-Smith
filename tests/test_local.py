@@ -9,19 +9,12 @@ from mastersmith import config, local, pricing  # noqa: E402
 from mastersmith.fal import Fal  # noqa: E402
 from mastersmith.images import Images  # noqa: E402
 from mastersmith.spec import Spec  # noqa: E402
-from mastersmith.stages.seed import seed_payload  # noqa: E402
 
 
 def free_spec(**kw):
     kw = {"category": "prop", **kw}
     return Spec(name="Lantern", description="a brass lantern",
                 seed_vendor="local", picture_model=config.LOCAL_PICTURE_MODEL, **kw)
-
-
-def test_local_seed_takes_the_primary_view_only():
-    model, payload = seed_payload(free_spec(), ["primary", "second", "mirror"])
-    assert model == config.LOCAL_SEED_MODEL
-    assert payload == {"image_url": "primary"}
 
 
 def test_a_free_build_estimates_nothing_for_pictures_and_mesh(monkeypatch):

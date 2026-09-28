@@ -180,7 +180,9 @@ def cmd_part_pictures(a):
     os.makedirs(d, exist_ok=True)
     side = os.path.join(d, "side.png")
     model = PICTURE_MODELS.get(a.model, a.model)
-    if a.erased or (is_body(part, plan) and not a.drawn):
+    if a.no_side:
+        print("side picture kept:", side)
+    elif a.erased or (is_body(part, plan) and not a.drawn):
         _, erased = erased_body_picture(plan, part, side)
         print("side picture: the approved side view with %s erased -> %s" % (", ".join(erased) or "nothing", side))
     else:
@@ -195,8 +197,12 @@ def cmd_part_pictures(a):
         print("side picture:", side)
     if not a.no_quarter:
         quarter = os.path.join(d, "quarter.png")
-        refs = [side] + ([plan["front"]] if plan.get("front") else [])
-        job.images.generate(THREE_QUARTER_PROMPT % (" Picture 2 shows its front end." if plan.get("front") else ""), quarter,
+        # 2026-09-28: the whole-object front view makes the model draw the whole object round a part (8 of 13 carbine
+        # parts came back as the whole rifle); --no-front drops it and --fixes reaches this prompt too.
+        front = plan.get("front") if not a.no_front else None
+        refs = [side] + ([front] if front else [])
+        job.images.generate(THREE_QUARTER_PROMPT % ((" Picture 2 shows its front end." if front else "")
+                                                    + (" " + a.fixes if a.fixes else "")), quarter,
                             model=model, references=refs, aspect_ratio="4:3")
         print("three-quarter picture:", quarter)
     print("Look at both (Read them). Redraw with --fixes '...' if the design drifted.")
@@ -432,7 +438,9 @@ def main(argv=None):
     s = sub.add_parser("plan"); s.add_argument("job"); s.add_argument("plan"); s.set_defaults(fn=cmd_plan)
     s = sub.add_parser("part-pictures"); s.add_argument("job"); s.add_argument("part"); s.add_argument("--fixes"); s.add_argument("--erased", action="store_true")
     s.add_argument("--drawn", action="store_true", help="draw the body alone instead of erasing the approved picture")
-    s.add_argument("--no-quarter", action="store_true"); s.add_argument("--model", default="nano"); s.set_defaults(fn=cmd_part_pictures)
+    s.add_argument("--no-quarter", action="store_true"); s.add_argument("--no-side", action="store_true", help="keep the side picture")
+    s.add_argument("--no-front", action="store_true", help="three-quarter picture without the front-view reference")
+    s.add_argument("--model", default="nano"); s.set_defaults(fn=cmd_part_pictures)
     s = sub.add_parser("mesh"); s.add_argument("job"); s.add_argument("part"); s.add_argument("--vendor", default="local")
     s.add_argument("--from", dest="src", default="quarter", choices=("quarter", "side")); s.set_defaults(fn=cmd_mesh)
     s = sub.add_parser("register"); s.add_argument("job"); s.add_argument("part"); s.add_argument("--from", dest="src", default="quarter", choices=("quarter", "side"))
