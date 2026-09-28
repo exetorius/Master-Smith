@@ -63,7 +63,8 @@ Say the estimate before a step that spends, in one line; never spend on a step t
    perspective. Check `parts/<Part>/seed_render.png` against `side.png`; if it sits wrong, `ms register <job>
    <Part> --yaw <deg> --pitch <deg>` (yaw about the vertical, pitch in the side plane, degrees) and look again.
 10. Commit only when `.venv/Scripts/python.exe -m pytest tests -q` passes. Commit messages end with
-    the agent's own co-author line (see its file). Never merge PRs; never push to `dev`/`main`.
+    the agent's own co-author line (see its file). `dev` is the working branch (owner, 2026-09-28): commit and
+    push there directly. `master` is what people run; it changes only by a PR from `dev` that the owner merges.
 
 ## The plan JSON (written by you, validated by `ms plan`)
 
