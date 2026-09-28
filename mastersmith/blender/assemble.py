@@ -211,7 +211,7 @@ def planned_linear(h, metal=False):
     return tuple(out)
 
 
-METAL_MIN_REFLECTANCE = 0.12       # blued or black steel: clearly metal, still dark (0.20 read as chrome)
+METAL_MIN_REFLECTANCE = 0.07       # blued or black steel: clearly metal, still dark (0.12 read as silver on a pistol slide)
 
 
 def image_mean_luminance(img):
@@ -298,7 +298,7 @@ def tint_to_plan(o, colour, mats=None, metal=False):
     return done
 
 
-def surface_detail(o, mat, strength=1.0, mats=None):
+def surface_detail(o, mat, strength=1.0, mats=None, vendor=False):
     """The material pass a texture artist gives a moulded or cast part, on a vendor seed before the bake: worn, lighter
     raised edges and darker recesses from the mesh's curvature (Cycles pointiness on the full-detail seed), a fine grain
     in the normal, and roughness that varies with it and polishes on the worn edges. A vendor's texture alone read as
@@ -307,6 +307,9 @@ def surface_detail(o, mat, strength=1.0, mats=None):
     metal = bool(mat.get("metal"))
     finish = mat.get("finish") or ("metal" if metal else "polymer")
     rubber = finish == "rubber"
+    # a mesher's surface is bumpy everywhere, so curvature finds "edges" all over it: a vendor part gets a third of
+    # the wear a clean code part gets (white flecks over the pistol's slide, 2026-09-28)
+    wear_k = 0.3 if vendor else 1.0
     for m in (mats if mats is not None else {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}):
         t = m.node_tree
         b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
@@ -342,7 +345,7 @@ def surface_detail(o, mat, strength=1.0, mats=None):
         wear2.operation = "MULTIPLY"
         wear2.use_clamp = True
         K.new(wear.outputs[0], wear2.inputs[0])
-        wear2.inputs[1].default_value = 0.8 * strength
+        wear2.inputs[1].default_value = 0.8 * strength * wear_k
         # base colour: lighter on the worn edges, darker in the recesses
         base = b.inputs["Base Color"]
         if base.is_linked:
@@ -364,25 +367,26 @@ def surface_detail(o, mat, strength=1.0, mats=None):
         gf.operation = "MULTIPLY"
         gf.use_clamp = True
         K.new(cavity.outputs["Result"], gf.inputs[0])
-        gf.inputs[1].default_value = 0.55 * strength
+        gf.inputs[1].default_value = 0.55 * strength * (0.6 if vendor else 1.0)
         K.new(gf.outputs[0], grime.inputs["Factor"])
         K.new(lighten.outputs["Result"], grime.inputs["A"])
         grime.inputs["B"].default_value = (0.45, 0.44, 0.43, 1.0)
         K.new(grime.outputs["Result"], base)
         # fine grain in the normal (polymer texture / cast or machined metal), chained onto any normal map the seed has
         grain = N.new("ShaderNodeTexNoise")
-        grain.inputs["Scale"].default_value = 1600.0 if rubber else 900.0 if not metal else 1400.0
+        grain.inputs["Scale"].default_value = 1600.0 if rubber else 900.0 if not metal else 2500.0
         grain.inputs["Detail"].default_value = 4.0
         if metal:
-            # brushed: the grain drawn out along the part's length
+            # brushed: a fine grain drawn out along the part's length, 6x not 20x (20x made 14 mm stripes over a
+            # pistol slide, 2026-09-28)
             stretch = N.new("ShaderNodeMapping")
-            stretch.inputs["Scale"].default_value = (0.05, 1.0, 1.0)
+            stretch.inputs["Scale"].default_value = (0.16, 1.0, 1.0)
             K.new(coord.outputs["Object"], stretch.inputs["Vector"])
             K.new(stretch.outputs["Vector"], grain.inputs["Vector"])
         else:
             K.new(coord.outputs["Object"], grain.inputs["Vector"])
         bump = N.new("ShaderNodeBump")
-        bump.inputs["Strength"].default_value = (0.7 if rubber else 0.35) * strength
+        bump.inputs["Strength"].default_value = (0.7 if rubber else 0.12 if metal else 0.35) * strength
         bump.inputs["Distance"].default_value = 0.001
         K.new(grain.outputs["Fac"], bump.inputs["Height"])
         nrm = b.inputs["Normal"]
@@ -436,9 +440,21 @@ def split_zones(o, zones):
         return []
     base = [sl.material for sl in o.material_slots]
     out = []
+    # face adjacency (shared vertices), to smooth a zone's ragged box edge by neighbour majority
+    vert_faces = {}
+    for f in me.polygons:
+        for v in f.vertices:
+            vert_faces.setdefault(v, []).append(f.index)
+    neigh = [set() for _ in range(n)]
+    for f in me.polygons:
+        for v in f.vertices:
+            neigh[f.index].update(vert_faces[v])
     for z in zones:
         lo, hi = np.array(z["box_min"]), np.array(z["box_max"])
         inside = np.all((centres >= lo) & (centres <= hi), axis=1)
+        for _ in range(2):
+            votes = np.array([inside[list(neigh[i])].mean() if neigh[i] else inside[i] for i in range(n)])
+            inside = votes > 0.5
         if inside.sum() < 20:
             continue
         made = {}
@@ -535,7 +551,7 @@ for p in args["parts"]:
             rec["tinted"] = tint_to_plan(o, pm.get("color"), rest, metal=bool(pm.get("metal")))
         rec["surface_planned"] = surface_to_plan(o, pm, rest)
         if args.get("surface_detail", True):
-            rec["surface_detail"] = surface_detail(o, pm, mats=rest)
+            rec["surface_detail"] = surface_detail(o, pm, mats=rest, vendor=True)
         for z, mats in zoned:
             zm = z.get("material") or {}
             if zm.get("glass") or zm.get("finish") == "glass":
@@ -544,7 +560,7 @@ for p in args["parts"]:
             tint_to_plan(o, zm.get("color"), mats, metal=bool(zm.get("metal")))
             surface_to_plan(o, zm, mats)
             if args.get("surface_detail", True):
-                surface_detail(o, zm, mats=mats)
+                surface_detail(o, zm, mats=mats, vendor=True)
         rec["zones"] = [z.get("name") for z, _m in zoned]
     for slot in o.material_slots:
         if slot.material:
@@ -558,7 +574,7 @@ if not parts:
     raise RuntimeError("no opaque parts to assemble")
 
 
-def sharpen_planar(o, band=0.003, flat_deg=10.0, min_area_frac=0.002, crease_deg=25.0):
+def sharpen_planar(o, band=None, flat_deg=10.0, min_area_frac=0.002, crease_deg=25.0):
     """Hard-surface edges back on a vendor seed (owner, 2026-09-27: "why can't Blender sharpen edges"). An image-to-3D
     mesh rounds every edge of a faceted body. This finds its large near-flat panels (region growing on face normals),
     flattens each onto its best-fit plane, and pulls the vertices of the rounded band between two panels onto the
@@ -567,6 +583,11 @@ def sharpen_planar(o, band=0.003, flat_deg=10.0, min_area_frac=0.002, crease_deg
     in (metres). -> {"panels", "flattened", "creased"}"""
     from mathutils import kdtree
     me = o.data
+    if band is None:
+        # the rounding a mesher puts on an edge grows with the object: 0.4% of its length (3 mm on the 68 cm bullpup),
+        # never under 0.8 mm or over 5 mm. A fixed 3 mm tore the edges of an 18.5 cm pistol (2026-09-28).
+        lo_b, hi_b = blib.dims(o)
+        band = min(0.005, max(0.0008, 0.004 * max((hi_b - lo_b)[:])))
     bm = bmesh.new()
     bm.from_mesh(me)
     bm.faces.ensure_lookup_table()

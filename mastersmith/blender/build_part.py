@@ -59,8 +59,8 @@ def make_material(spec):
     if metal:
         # a metal's base colour is its reflectance: black steel still reflects about a fifth of the light
         lum = 0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2]
-        if lum < 0.12:                              # blued or black steel: clearly metal, still dark (0.20 read as chrome)
-            base = tuple(min(1.0, c * 0.12 / max(lum, 1e-4)) for c in base)
+        if lum < 0.07:                              # blued or black steel: clearly metal, still dark
+            base = tuple(min(1.0, c * 0.07 / max(lum, 1e-4)) for c in base)
         rough = min(rough, 0.4)
     elif finish == "rubber":
         rough = max(rough, 0.85)
