@@ -175,6 +175,63 @@ def clean_name(name, taken):
     return out
 
 
+def snap_to_silhouette(plan, threshold=0.1):
+    """Thin code parts that stick out of everything else (a barrel, a muzzle device) get their height from the side
+    picture's silhouette instead of the planner's eyeballed percentages: read off a 5% grid, the bullpup's barrel was
+    planned 10.6 mm across where the picture shows 13.3 mm (2026-09-27). Only parts whose box lies mostly outside every
+    other part's box, so the silhouette in their columns is theirs alone. -> [(name, old height %, new height %)]"""
+    import numpy as np
+    a = np.asarray(Image.open(plan["side"]).convert("RGB")).astype(np.float32) / 255.0
+    h, w = a.shape[:2]
+    k = max(2, min(h, w) // 40)
+    back = np.median(np.concatenate([a[:k, :k].reshape(-1, 3), a[:k, -k:].reshape(-1, 3), a[-k:, :k].reshape(-1, 3),
+                                     a[-k:, -k:].reshape(-1, 3)]), axis=0)
+    fg = np.abs(a - back).max(axis=2) > threshold
+    changed = []
+    for p in plan["parts"]:
+        if p.get("method") != "code":
+            continue
+        x0, x1, zt, zb = p["side_box"]
+        area = max(1e-9, (x1 - x0) * (zb - zt))
+        inside = 0.0
+        for q in plan["parts"]:
+            if q is p:
+                continue
+            qx0, qx1, qzt, qzb = q["side_box"]
+            inside = max(inside, max(0.0, min(x1, qx1) - max(x0, qx0)) * max(0.0, min(zb, qzb) - max(zt, qzt)) / area)
+        if inside > 0.5:
+            continue
+        # the part's own columns (clear of its ends, where neighbours meet it), rows near its planned band
+        span = x1 - x0
+        c0, c1 = int((x0 + 0.2 * span) / 100 * w), int((x1 - 0.2 * span) / 100 * w)
+        band = zb - zt
+        r0, r1 = int(max(0.0, zt - 0.6 * band) / 100 * h), int(min(100.0, zb + 0.6 * band) / 100 * h)
+        tops, bots = [], []
+        for c in range(max(0, c0), min(w, c1 + 1)):
+            rows = np.nonzero(fg[r0:r1, c])[0]
+            if len(rows):
+                tops.append(r0 + rows.min())
+                bots.append(r0 + rows.max() + 1)
+        if len(tops) < 5:
+            continue
+        nzt, nzb = float(np.median(tops)) / h * 100, float(np.median(bots)) / h * 100
+        if not (0.5 * band <= nzb - nzt <= 2.0 * band):
+            continue
+        p["side_box"] = [x0, x1, round(nzt, 2), round(nzb, 2)]
+        p["box_min"], p["box_max"] = to_metres(p["side_box"], p["front_span"], plan["dims_m"])
+        # a part standing out on its own like this is a turned one (a barrel, a muzzle device): no narrower across than
+        # it is tall, whatever the front picture's end-on reading said
+        W = plan["dims_m"][1]
+        tall = p["box_max"][2] - p["box_min"][2]
+        if p["box_max"][1] - p["box_min"][1] < 0.8 * tall and W > 0:
+            yc = (p["box_min"][1] + p["box_max"][1]) / 2
+            p["front_span"] = [round(max(0.0, (yc - tall / 2 + W / 2) / W * 100), 2),
+                               round(min(100.0, (yc + tall / 2 + W / 2) / W * 100), 2)]
+            p["box_min"], p["box_max"] = to_metres(p["side_box"], p["front_span"], plan["dims_m"])
+        changed.append((p["name"], band, nzb - nzt))
+    return changed
+
+
 def validate_plan(raw, dims, max_parts=None):
     """The builder's JSON -> a clean plan: unique names, a known method, a material, boxes in metres. Parts whose
     numbers make no sense are dropped with the reason; a plan with fewer than two parts is refused."""
@@ -294,6 +351,8 @@ def make_plan(job, spec, side_src, front_src, mirror_side=False):
     else:
         raise RuntimeError("the builder could not plan the parts: %s" % last)
     plan.update({"side": side, "front": front, "side_grid": side_g, "front_grid": front_g})
+    for name, before, after in snap_to_silhouette(plan):
+        job.log("  %s: box snapped to the picture, height %.1f%% -> %.1f%%" % (name, before, after))
     with open(os.path.join(work, "plan.json"), "w") as f:
         json.dump(plan, f, indent=1)
     job.log("  plan: %d parts (%d code, %d vendor), %.3f x %.3f x %.3f m%s" % (

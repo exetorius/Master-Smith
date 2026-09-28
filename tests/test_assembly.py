@@ -319,3 +319,25 @@ def test_the_body_picture_erases_only_code_parts_that_stick_out():
         path, erased = erased_body_picture(plan, body, os.path.join(d, "b.png"))
         assert erased == ["Barrel"]
         assert Image.open(path).size[0] == Image.open(path).size[1]
+
+
+def test_a_thin_part_standing_out_is_snapped_to_the_picture():
+    from PIL import Image, ImageDraw
+    from mastersmith.stages.plan import snap_to_silhouette
+    with tempfile.TemporaryDirectory() as d:
+        im = Image.new("RGB", (1000, 400), (245, 245, 245))
+        dr = ImageDraw.Draw(im)
+        dr.rectangle((0, 100, 699, 399), fill=(90, 90, 90))       # the body
+        dr.rectangle((700, 200, 999, 227), fill=(20, 20, 20))     # a barrel 7% of the height, planned at 5%
+        im.save(os.path.join(d, "side.png"))
+        dims = [1.0, 0.2, 0.4]
+        parts = [{"name": "Body", "method": "vendor", "side_box": [0, 70, 25, 100], "front_span": [0, 100]},
+                 {"name": "Barrel", "method": "code", "side_box": [70, 100, 50, 55], "front_span": [45, 55]}]
+        for q in parts:
+            q["box_min"], q["box_max"] = to_metres(q["side_box"], q["front_span"], dims)
+        plan = {"side": os.path.join(d, "side.png"), "parts": parts, "dims_m": dims}
+        assert [c[0] for c in snap_to_silhouette(plan)] == ["Barrel"]
+        b = parts[1]
+        assert b["side_box"][2] == pytest.approx(50, abs=0.5) and b["side_box"][3] == pytest.approx(57, abs=0.5)
+        assert b["box_max"][1] - b["box_min"][1] == pytest.approx(b["box_max"][2] - b["box_min"][2], rel=0.05)   # round
+        assert parts[0]["side_box"] == [0, 70, 25, 100]          # the body is not snapped

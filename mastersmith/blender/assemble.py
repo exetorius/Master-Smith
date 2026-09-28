@@ -66,11 +66,19 @@ def fit(o, p):
     bmin, bmax = Vector(p["box_min"]), Vector(p["box_max"])
     centre, size = (bmin + bmax) * 0.5, bmax - bmin
     if p["kind"] == "code":
+        # a code part's box is its tight bounds: a build that falls short of it on an axis by more than 8% is scaled to
+        # fill it (at most 1.5x). The bullpup's barrel was built 7 mm across in a 10.6 mm box, every build (2026-09-27)
+        lo_c, hi_c = blib.dims(o)
+        ext_c = hi_c - lo_c
+        fill = [min(2.0, size[i] / ext_c[i]) if ext_c[i] > 1e-9 and size[i] / ext_c[i] > 1.08 else 1.0 for i in range(3)]
+        if fill != [1.0, 1.0, 1.0]:
+            o.data.transform(Matrix.Translation(-(lo_c + hi_c) * 0.5))
+            o.data.transform(Matrix.Diagonal(Vector(fill).to_4d()))
         g = float(p.get("cover") or 1.0)          # grown a little over the vendor body's soft copy of this part
         if g != 1.0:
             o.data.transform(Matrix.Diagonal(Vector((g, g, g, 1.0))))
         o.data.transform(Matrix.Translation(centre))
-        return {"scale": g}
+        return {"scale": g, "filled": [round(v, 3) for v in fill]}
     if p.get("yaw"):
         o.data.transform(Matrix.Rotation(math.radians(float(p["yaw"])), 4, "Z"))
     lo, hi = blib.dims(o)
