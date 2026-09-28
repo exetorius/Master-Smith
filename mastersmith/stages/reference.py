@@ -227,12 +227,15 @@ def make_reference(job, skill):
     views = [primary]
     pictures = [{"label": view, "path": primary}]
     seed_views = None
-    if spec.multiview and spec.category == "helicopter":
+    from ..spec import assembly_wanted
+    if spec.multiview and spec.category == "helicopter" and not assembly_wanted(spec):
         # the skill's rule: one three-quarter picture. A helicopter's front view is its rotor disc edge-on, which the
         # checker rejects for "cut-off blade tips" every time (the Apache, 2026-09-24: two edits paid, none accepted)
         # and which would fail the narrower-than-the-side test anyway; a profile grew a second tail rotor (2026-09-17).
+        # An assembly cannot be planned without a side and a front view, so it tries them anyway (a rotorless
+        # gunship passes; a real helicopter's failed front view leaves seed_views empty and the build says so).
         job.log("  helicopter: seeding from the one three-quarter picture (no orthographic views, per the skill)")
-    elif spec.multiview and spec.category in ("vehicle", "aircraft") and not getattr(job, "edit_refused", False):
+    elif spec.multiview and spec.category in ("vehicle", "aircraft", "helicopter") and not getattr(job, "edit_refused", False):
         seed_views = _orthographic_views(job, skill, primary)
         if seed_views:
             pictures += [{"label": "orthographic front view", "path": seed_views[0]}, {"label": "orthographic left side", "path": seed_views[1]},
