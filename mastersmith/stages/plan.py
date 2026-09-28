@@ -257,6 +257,10 @@ def snap_to_silhouette(plan, threshold=0.1):
         if p.get("method") != "code" and not config.ALL_VENDOR:
             continue
         x0, x1, zt, zb = p["side_box"]
+        # only THIN parts: a barrel, a muzzle device, a tube. With every part from the mesher the receiver and the
+        # sights were snapped and flagged as centreline parts and moved onto the bore (2026-09-28)
+        if not ((zb - zt) <= 12 and (x1 - x0) >= 2.0 * (zb - zt)):
+            continue
         area = max(1e-9, (x1 - x0) * (zb - zt))
         inside = 0.0
         for q in plan["parts"]:
