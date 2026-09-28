@@ -406,13 +406,24 @@ def model_options(all_models=False):
         extra = [mid for mid, p in prices.items() if p["tools"] and p["vision"] and mid not in seen
                  and not mid.startswith("~") and ":" not in mid.split("/")[-1]]
         director += [_director_entry(mid, prices) for mid in sorted(extra)]
-    return {"seed_vendors": pricing.vendor_catalogue(),
-            "picture_models": pricing.picture_catalogue(),
-            "director_models": director, "all_models": all_models,
+    vendors, pictures = pricing.vendor_catalogue(), pricing.picture_catalogue()
+    if config.LLM_BACKEND != "openrouter":
+        # every model call goes to the CLI on this PC: the list says so instead of offering OpenRouter prices
+        who = {"claude-code": "Claude Code", "codex": "Codex"}[config.LLM_BACKEND]
+        director = [{"id": config.DIRECTOR_MODEL, "label": "%s on this PC (your subscription) · $0" % who,
+                     "in_per_m": 0, "out_per_m": 0, "tools": True, "vision": True, "context": None}]
+    if config.NO_SPEND:
+        # nothing paid can run: offer only what does (the models on this PC), marked as the default
+        vendors = [dict(v, default=True) for v in vendors if v["key"] == "local"]
+        pictures = [dict(pm, default=True) for pm in pictures if pm["id"].startswith("local/")]
+    return {"seed_vendors": vendors,
+            "picture_models": pictures,
+            "director_models": director, "all_models": all_models, "no_spend": config.NO_SPEND,
+            "llm_backend": config.LLM_BACKEND,
             "pictures": {"concept": config.CONCEPT_MODEL, "concept_hard_surface": config.CONCEPT_MODEL_HARD,
                          "concept_premium": config.CONCEPT_MODEL_PREMIUM, "edit": config.EDIT_MODEL, "vision": config.VISION_MODEL},
             "defaults": {"seed_vendor": pricing.seed_vendor(Spec(name="X", description="x"))["key"], "director_model": config.DIRECTOR_MODEL,
-                         "picture_model": config.CONCEPT_MODEL}}
+                         "picture_model": config.LOCAL_PICTURE_MODEL if config.NO_SPEND else config.CONCEPT_MODEL}}
 
 
 def _attachment_note(attachments):
