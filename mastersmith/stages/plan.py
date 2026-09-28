@@ -219,6 +219,7 @@ def snap_to_silhouette(plan, threshold=0.1):
             continue
         p["side_box"] = [x0, x1, round(nzt, 2), round(nzb, 2)]
         p["box_min"], p["box_max"] = to_metres(p["side_box"], p["front_span"], plan["dims_m"])
+        p["centreline"] = True                    # the assembler lines it up with the body's own axis
         # a part standing out on its own like this is a turned one (a barrel, a muzzle device): no narrower across than
         # it is tall, whatever the front picture's end-on reading said
         W = plan["dims_m"][1]

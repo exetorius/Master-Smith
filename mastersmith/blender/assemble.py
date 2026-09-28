@@ -450,6 +450,185 @@ for p in args["parts"]:
 if not parts:
     raise RuntimeError("no opaque parts to assemble")
 
+
+def sharpen_planar(o, band=0.003, flat_deg=10.0, min_area_frac=0.002, crease_deg=25.0):
+    """Hard-surface edges back on a vendor seed (owner, 2026-09-27: "why can't Blender sharpen edges"). An image-to-3D
+    mesh rounds every edge of a faceted body. This finds its large near-flat panels (region growing on face normals),
+    flattens each onto its best-fit plane, and pulls the vertices of the rounded band between two panels onto the
+    line where the planes meet: the fillet becomes a crease. Curved areas (a grip, a magazine) have no large flat
+    panel and are left alone; vertices only move, so the UVs and texture stay. `band` is the widest rounding pulled
+    in (metres). -> {"panels", "flattened", "creased"}"""
+    from mathutils import kdtree
+    me = o.data
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.faces.ensure_lookup_table()
+    bm.verts.ensure_lookup_table()
+    nf = len(bm.faces)
+    if nf < 200:
+        bm.free()
+        return {"panels": 0, "flattened": 0, "creased": 0}
+    normals = np.array([f.normal[:] for f in bm.faces], np.float64)
+    centres = np.array([f.calc_center_median()[:] for f in bm.faces], np.float64)
+    areas = np.array([f.calc_area() for f in bm.faces], np.float64)
+    total = areas.sum()
+    cos_flat = math.cos(math.radians(flat_deg))
+    region = np.full(nf, -1, np.int64)
+    panels = []                                   # (normal, point, face ids)
+    order = np.argsort(-areas)
+    for seed in order:
+        if region[seed] != -1:
+            continue
+        n0 = normals[seed]
+        stack, members = [seed], []
+        region[seed] = -2
+        while stack:
+            i = stack.pop()
+            members.append(i)
+            for e in bm.faces[i].edges:
+                for g in e.link_faces:
+                    j = g.index
+                    if region[j] == -1 and normals[j].dot(n0) > cos_flat and abs(n0.dot(centres[j] - centres[seed])) < band * 0.4:
+                        region[j] = -2
+                        stack.append(j)
+        members = np.array(members)
+        if areas[members].sum() < min_area_frac * total or len(members) < 12:
+            region[members] = -3                   # too small to be a panel: left as it is
+            continue
+        w = areas[members][:, None]
+        c = (centres[members] * w).sum(0) / w.sum()
+        cov = ((centres[members] - c) * w).T @ (centres[members] - c)
+        n = np.linalg.eigh(cov)[1][:, 0]
+        if n.dot(n0) < 0:
+            n = -n
+        region[members] = len(panels)
+        panels.append((n, c, members))
+    if not panels:
+        bm.free()
+        return {"panels": 0, "flattened": 0, "creased": 0}
+    # which panels each vertex touches
+    vert_panels = [set() for _ in bm.verts]
+    for pi, (_n, _c, members) in enumerate(panels):
+        for fi in members:
+            for v in bm.faces[fi].verts:
+                vert_panels[v.index].add(pi)
+    tree = kdtree.KDTree(sum(len(m) for _n, _c, m in panels))
+    k = 0
+    for pi, (_n, _c, members) in enumerate(panels):
+        for fi in members:
+            tree.insert(centres[fi], pi)
+            k += 1
+    tree.balance()
+    flattened = creased = 0
+    cos_crease = math.cos(math.radians(crease_deg))
+    new_co = {}
+    for v in bm.verts:
+        p = np.array(v.co[:], np.float64)
+        own = vert_panels[v.index]
+        inner = len(own) == 1 and all(region[f.index] == next(iter(own)) for f in v.link_faces)
+        if inner:                                  # wholly inside one panel: flattened onto it
+            n, c, _m = panels[next(iter(own))]
+            d = n.dot(p - c)
+            if abs(d) < band:
+                new_co[v.index] = p - n * d
+                flattened += 1
+            continue
+        if own:
+            continue                               # a panel's border vertex that is not in a rounding: left alone
+        # a vertex of the rounded band (or a seam between panels): the two nearest panels that meet at an edge
+        near = {}
+        for (_co, pi, dist) in tree.find_range(v.co, band * 1.5):
+            if pi not in near or dist < near[pi]:
+                near[pi] = dist
+        cand = sorted(near, key=near.get)
+        pair = None
+        for a in range(len(cand)):
+            for b in range(a + 1, len(cand)):
+                if panels[cand[a]][0].dot(panels[cand[b]][0]) < cos_crease:
+                    pair = (cand[a], cand[b])
+                    break
+            if pair:
+                break
+        if not pair:
+            continue
+        (n1, c1, _), (n2, c2, _) = panels[pair[0]], panels[pair[1]]
+        if abs(n1.dot(p - c1)) > band or abs(n2.dot(p - c2)) > band:
+            continue                               # not in the rounding between these two panels
+        dirn = np.cross(n1, n2)
+        if np.linalg.norm(dirn) < 1e-6:
+            continue
+        dirn /= np.linalg.norm(dirn)
+        # a point on the line: solve n1.x = n1.c1, n2.x = n2.c2, dirn.x = dirn.p
+        A = np.array([n1, n2, dirn])
+        rhs = np.array([n1.dot(c1), n2.dot(c2), dirn.dot(p)])
+        try:
+            q = np.linalg.solve(A, rhs)
+        except np.linalg.LinAlgError:
+            continue
+        if np.linalg.norm(q - p) < band:
+            new_co[v.index] = q
+            creased += 1
+    old = {i: bm.verts[i].co.copy() for i in new_co}
+    before = {f.index: f.normal.copy() for i in new_co for f in bm.verts[i].link_faces}
+    for i, co in new_co.items():
+        bm.verts[i].co = co
+    for _ in range(3):                             # a move that flips or badly tilts a face is undone
+        bm.normal_update()
+        bad = set()
+        for fi, n0 in before.items():
+            f = bm.faces[fi]
+            if f.calc_area() > 1e-14 and f.normal.dot(n0) < 0.3:
+                bad.update(v.index for v in f.verts if v.index in old)
+        if not bad:
+            break
+        for i in bad:
+            bm.verts[i].co = old.pop(i)
+            new_co.pop(i, None)
+    flattened = sum(1 for i in new_co if len(vert_panels[i]) == 1)
+    creased = len(new_co) - flattened
+    bm.normal_update()
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    sharp_by_angle(o, degrees=crease_deg + 5)
+    return {"panels": len(panels), "flattened": flattened, "creased": creased}
+
+
+def align_to_body(parts, specs):
+    """Centreline parts (a barrel, a muzzle device) moved sideways onto the vendor body's own centreline where they
+    meet it: their place came from the front picture's percentages, the body's from the mesher, and the bullpup's
+    barrel ran 4.3 mm off the handguard's axis seen from above (2026-09-27). The body's centre is the middle of its
+    front-most section, measured over a slab as long as the part is tall."""
+    vend = [(o, r) for o, r in parts if r["kind"] == "vendor"]
+    if not vend:
+        return []
+    body = max(vend, key=lambda t: (t[1]["box_max"][0] - t[1]["box_min"][0]))[0]
+    co = np.empty(len(body.data.vertices) * 3, np.float32)
+    body.data.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    moved = []
+    for o, r in parts:
+        spec = specs.get(r["name"]) or {}
+        if r["kind"] != "code" or not spec.get("centreline"):
+            continue
+        lo, hi = blib.dims(o)
+        zc, tall = (lo.z + hi.z) / 2, max(hi.z - lo.z, 1e-4)
+        front = co[:, 0].max()
+        near = co[(co[:, 0] > front - 3 * tall) & (np.abs(co[:, 2] - zc) < 2.5 * tall)]
+        if len(near) < 20:
+            continue
+        yc = float((near[:, 1].min() + near[:, 1].max()) / 2)
+        dy = yc - (lo.y + hi.y) / 2
+        if abs(dy) > 1e-5:
+            o.data.transform(Matrix.Translation((0.0, dy, 0.0)))
+            r["centred_on_body_m"] = round(dy, 5)
+            moved.append((r["name"], dy))
+    return moved
+
+
+for name, dy in align_to_body(parts, {p["name"]: p for p in args["parts"]}):
+    log("%s: moved %.1f mm sideways onto the body's centreline" % (name, dy * 1000))
+
 # ---------------------------------------------------------------- the triangle budget: code parts as built, vendor parts share the rest
 budget = int(args["tri_budget"])
 vendor = [(o, r) for o, r in parts if r["kind"] == "vendor"]
@@ -466,6 +645,13 @@ def sharp_by_angle(o, degrees=30):
     bm.to_mesh(o.data)
     bm.free()
 
+
+# hard-surface edges back on the vendor seeds before anything is copied, decimated or baked
+if args.get("sharpen", True):
+    for o, r in parts:
+        if r["kind"] == "vendor":
+            r["sharpened"] = sharpen_planar(o)
+            log("%s: sharpened %s" % (r["name"], r["sharpened"]))
 
 # the bake source keeps every part at full detail: decimating first and baking from the decimated mesh threw away all
 # of a seed's fine detail (the free pistol's 280k-face TRELLIS body came out melted at 40k with nothing to bake back,

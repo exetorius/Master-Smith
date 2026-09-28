@@ -18,7 +18,10 @@ judging. The asset must be right from all six: parts that belong on one line (a 
 sights of a weapon; the wheels of a vehicle) line up in the front and top views; nothing is slanted, bent, twisted,
 floating free, doubled, poking through another part or missing; left and right match where the object is symmetric;
 the underside and the back are finished, not open or melted. An asset that looks right from one side and wrong from
-another is NOT shippable: any such defect makes the verdict "rebuild". Name the view that shows each issue
+another is NOT shippable: any such defect makes the verdict "rebuild".
+Judge function with common sense too, not only likeness: a firearm's barrel, the bore through its handguard and its
+muzzle device must lie on one straight axis (a bullet has to pass straight through); wheels must touch the ground on
+one plane and sit on their axles; doors, hatches and moving parts must be able to move. Name the view that shows each issue
 ("front view: the barrel sits left of the handguard").
 Do not infer detail from logs. A low-confidence or unreadable review is not acceptance.
 Answer JSON only:

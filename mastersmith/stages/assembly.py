@@ -79,7 +79,10 @@ Coordinates in percent of the REFERENCE pictures, like the plan. Empty lists whe
 The LAST picture shows the assembly from ABOVE (the forward end at the top of the picture). Parts that sit on the
 object's centreline (a barrel, a muzzle device, a rail, sights) must line up with the body along one straight line; a
 part off to one side, or a body that runs at a slant to them, is wrong: move the part's front_span, or rebuild the
-body when it is the slanted one."""
+body when it is the slanted one.
+Use common sense about how the object works, not only the pictures: a firearm's chamber, barrel, the bore through its
+handguard and its muzzle device lie on ONE straight axis - a bullet has to pass straight through. A barrel that sits
+off that axis, points at a slant or misses the handguard's opening is wrong even where the picture is unclear."""
 
 
 def _code_from(text):
@@ -673,7 +676,7 @@ def _assemble(job, spec, plan, built, round_no, reference):
         if not b:
             continue
         entry = {"name": p["name"], "kind": "code" if b.get("code") else "vendor", "box_min": p["box_min"],
-                 "box_max": p["box_max"], "material": p["material"]}
+                 "box_max": p["box_max"], "material": p["material"], "centreline": bool(p.get("centreline"))}
         if b.get("code") and any(is_body(q, plan) and _mostly_inside(p, q) for q in plan["parts"]):
             entry["cover"] = 1.03      # over the vendor body's own soft copy of it (kept in the body's picture)
         if b.get("code"):
