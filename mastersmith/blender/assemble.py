@@ -594,40 +594,96 @@ def sharpen_planar(o, band=0.003, flat_deg=10.0, min_area_frac=0.002, crease_deg
     return {"panels": len(panels), "flattened": flattened, "creased": creased}
 
 
+def find_bore(body_co, body_faces, centre, radius):
+    """The body's own bore near `centre` (y, z) at its front end: rays cast straight back over a window around it; the
+    bore is a round, enclosed region where they run deep (a shroud or muzzle opening), nearest the planned axis. The
+    bullpup's TRELLIS body had a barrel shroud with a clean bore 20 mm from where the picture put the barrel, and the
+    code barrel entered beside it (2026-09-28). -> (y, z) or None"""
+    from mathutils.bvhtree import BVHTree
+    bvh = BVHTree.FromPolygons([Vector(v) for v in body_co], body_faces)
+    front = float(body_co[:, 0].max()) + radius
+    half, step = 4.0 * radius, radius / 6.0
+    ys = np.arange(centre[0] - half, centre[0] + half, step)
+    zs = np.arange(centre[1] - half, centre[1] + half, step)
+    deep = np.zeros((len(zs), len(ys)), bool)
+    for i, z in enumerate(zs):
+        for j, y in enumerate(ys):
+            hit = bvh.ray_cast(Vector((front, y, z)), Vector((-1.0, 0.0, 0.0)), 12 * radius)
+            deep[i, j] = hit[0] is None or (front - hit[0].x) > 4 * radius
+    seen = np.zeros_like(deep)
+    best = None
+    for i0 in range(deep.shape[0]):
+        for j0 in range(deep.shape[1]):
+            if not deep[i0, j0] or seen[i0, j0]:
+                continue
+            stack, cells, edge = [(i0, j0)], [], False
+            seen[i0, j0] = True
+            while stack:
+                i, j = stack.pop()
+                cells.append((i, j))
+                if i in (0, deep.shape[0] - 1) or j in (0, deep.shape[1] - 1):
+                    edge = True                    # open to the window's border: not an enclosed bore
+                for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    a2, b2 = i + di, j + dj
+                    if 0 <= a2 < deep.shape[0] and 0 <= b2 < deep.shape[1] and deep[a2, b2] and not seen[a2, b2]:
+                        seen[a2, b2] = True
+                        stack.append((a2, b2))
+            if edge:
+                continue
+            cells = np.array(cells)
+            area = len(cells) * step * step
+            circle = math.pi * radius * radius
+            ext = (np.ptp(cells[:, 0]) + 1, np.ptp(cells[:, 1]) + 1)
+            roundness = len(cells) / (math.pi * (max(ext) / 2.0) ** 2)
+            if not (0.1 * circle <= area <= 6 * circle) or roundness < 0.5:
+                continue
+            cy, cz = float(ys[int(round(cells[:, 1].mean()))]), float(zs[int(round(cells[:, 0].mean()))])
+            dist = math.hypot(cy - centre[0], cz - centre[1])
+            if dist <= 3.5 * radius and (best is None or dist < best[0]):
+                best = (dist, cy, cz)
+    return (best[1], best[2]) if best else None
+
+
 def align_to_body(parts, specs):
-    """Centreline parts (a barrel, a muzzle device) moved sideways onto the vendor body's own centreline where they
-    meet it: their place came from the front picture's percentages, the body's from the mesher, and the bullpup's
-    barrel ran 4.3 mm off the handguard's axis seen from above (2026-09-27). The body's centre is the middle of its
-    front-most section, measured over a slab as long as the part is tall."""
+    """Centreline parts (a barrel, a muzzle device) put on the vendor body's own axis where they enter it: their place
+    came from the pictures, the body's from the mesher, and the two disagree by millimetres - enough that a bullet
+    could not pass (owner, 2026-09-28). First the body's bore (find_bore): the parts move onto it in both directions.
+    Without one, the middle of the body's front section decides the sideways place. Every centreline part moves by the
+    same amount, so a barrel and its muzzle device stay on one axis."""
     vend = [(o, r) for o, r in parts if r["kind"] == "vendor"]
-    if not vend:
+    line = [(o, r) for o, r in parts if r["kind"] == "code" and (specs.get(r["name"]) or {}).get("centreline")]
+    if not vend or not line:
         return []
     body = max(vend, key=lambda t: (t[1]["box_max"][0] - t[1]["box_min"][0]))[0]
     co = np.empty(len(body.data.vertices) * 3, np.float32)
     body.data.vertices.foreach_get("co", co)
     co = co.reshape(-1, 3)
-    moved = []
-    for o, r in parts:
-        spec = specs.get(r["name"]) or {}
-        if r["kind"] != "code" or not spec.get("centreline"):
-            continue
-        lo, hi = blib.dims(o)
-        zc, tall = (lo.z + hi.z) / 2, max(hi.z - lo.z, 1e-4)
+    faces = [tuple(pl.vertices) for pl in body.data.polygons]
+    # the part that enters the body: the rearmost centreline part (a barrel before its muzzle device)
+    lead = min(line, key=lambda t: blib.dims(t[0])[0].x)[0]
+    lo, hi = blib.dims(lead)
+    yc, zc = (lo.y + hi.y) / 2, (lo.z + hi.z) / 2
+    radius = max(min(hi.y - lo.y, hi.z - lo.z) / 2, 1e-4)
+    bore = find_bore(co, faces, (yc, zc), radius)
+    if bore:
+        dy, dz, how = bore[0] - yc, bore[1] - zc, "onto the body's bore"
+    else:
         front = co[:, 0].max()
-        near = co[(co[:, 0] > front - 3 * tall) & (np.abs(co[:, 2] - zc) < 2.5 * tall)]
+        near = co[(co[:, 0] > front - 6 * radius) & (np.abs(co[:, 2] - zc) < 5 * radius)]
         if len(near) < 20:
-            continue
-        yc = float((near[:, 1].min() + near[:, 1].max()) / 2)
-        dy = yc - (lo.y + hi.y) / 2
-        if abs(dy) > 1e-5:
-            o.data.transform(Matrix.Translation((0.0, dy, 0.0)))
-            r["centred_on_body_m"] = round(dy, 5)
-            moved.append((r["name"], dy))
+            return []
+        dy, dz, how = float((near[:, 1].min() + near[:, 1].max()) / 2) - yc, 0.0, "onto the body's centreline"
+    moved = []
+    if abs(dy) > 1e-5 or abs(dz) > 1e-5:
+        for o, r in line:
+            o.data.transform(Matrix.Translation((0.0, dy, dz)))
+            r["centred_on_body_m"] = [round(dy, 5), round(dz, 5)]
+            moved.append((r["name"], dy, dz, how))
     return moved
 
 
-for name, dy in align_to_body(parts, {p["name"]: p for p in args["parts"]}):
-    log("%s: moved %.1f mm sideways onto the body's centreline" % (name, dy * 1000))
+for name, dy, dz, how in align_to_body(parts, {p["name"]: p for p in args["parts"]}):
+    log("%s: moved %.1f mm sideways and %.1f mm up %s" % (name, dy * 1000, dz * 1000, how))
 
 # ---------------------------------------------------------------- the triangle budget: code parts as built, vendor parts share the rest
 budget = int(args["tri_budget"])
