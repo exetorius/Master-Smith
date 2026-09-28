@@ -31,24 +31,7 @@ a bullpup stock that is moulded with its receiver, a vehicle's one-piece body sh
 one moulding becomes a visible seam or gap when the halves are built apart. Everything that is bolted, clipped or
 slid onto that moulding is its own part.
 
-For each part choose how it is built - by what the part IS, not by how big it is:
-- "code": modelled in code from primitives with exact edges. Use it for every part that IS a primitive shape or a
-  stack of them: turned parts (barrels, muzzle devices, suppressors, gas blocks, knobs, exhaust tips, wheel hubs, a
-  wheel with its tyre - a lathe shape with a tread repeated round it), repeated machined parts (Picatinny / M-LOK
-  rails, slotted covers, fin stacks, grilles, rocket-pod faces), flat or faceted panels and plates, boxes with cuts
-  (a magazine, a butt pad, a mirror head, a bumper with tow hooks, a rocket pod), rods and tubes, and every control
-  that sticks out sideways on ONE side only (a charging handle, a selector, a release button - the mesher would
-  mirror it onto both sides).
-- "vendor": an AI image-to-3D model of that ONE part, drawn alone. Use it for every part with sculpted, moulded or
-  compound-curved surfaces that primitives cannot describe: a pistol grip with finger grooves, a moulded stock and
-  receiver, a shaped handguard shell, a slide with its contours, a helicopter hull section, a canopy, a fender. The
-  vendor is free on this PC, so use it for every such part - never lump several parts into one vendor part
-  (four tyres drawn together came back as one black blob), and never send a primitive shape to it.
-For a vendor part, "what" describes that part alone as it looks in the picture and names the neighbours it is drawn
-WITHOUT. Give it the colour of its largest area; if it shows clearly different colours, set "keep_texture": true.
-Windows, windshields and canopies are "glass" zones of the vendor part that carries them, or, when the glass is a
-separate pane, a code part with "glass": true.
-A typical rifle is 10-16 parts, a pistol 6-10, a truck 12-20 (body shell, hood, bed, doors if separate, each wheel,
+{method_rule}A typical rifle is 10-16 parts, a pistol 6-10, a truck 12-20 (body shell, hood, bed, doors if separate, each wheel,
 bumpers, mirrors, lights), an aircraft 8-14 (hull, canopy, engines, pods, guns, skids or gear, tail).
 
 Answer JSON only:
@@ -183,6 +166,40 @@ def clean_name(name, taken):
     return out
 
 
+CODE_OR_VENDOR_RULE = """For each part choose how it is built - by what the part IS, not by how big it is:
+- "code": modelled in code from primitives with exact edges. Use it for every part that IS a primitive shape or a
+  stack of them: turned parts (barrels, muzzle devices, suppressors, gas blocks, knobs, exhaust tips, wheel hubs, a
+  wheel with its tyre - a lathe shape with a tread repeated round it), repeated machined parts (Picatinny / M-LOK
+  rails, slotted covers, fin stacks, grilles, rocket-pod faces), flat or faceted panels and plates, boxes with cuts
+  (a magazine, a butt pad, a mirror head, a bumper with tow hooks, a rocket pod), rods and tubes, and every control
+  that sticks out sideways on ONE side only (a charging handle, a selector, a release button - the mesher would
+  mirror it onto both sides).
+- "vendor": an AI image-to-3D model of that ONE part, drawn alone. Use it for every part with sculpted, moulded or
+  compound-curved surfaces that primitives cannot describe: a pistol grip with finger grooves, a moulded stock and
+  receiver, a shaped handguard shell, a slide with its contours, a helicopter hull section, a canopy, a fender. The
+  vendor is free on this PC, so use it for every such part - never lump several parts into one vendor part
+  (four tyres drawn together came back as one black blob), and never send a primitive shape to it.
+For a vendor part, "what" describes that part alone as it looks in the picture and names the neighbours it is drawn
+WITHOUT. Give it the colour of its largest area; if it shows clearly different colours, set "keep_texture": true.
+Windows, windshields and canopies are "glass" zones of the vendor part that carries them, or, when the glass is a
+separate pane, a code part with "glass": true.
+"""
+
+ALL_VENDOR_RULE = """Every part is built the same way: "method" is always "vendor" - an AI image-to-3D model of that ONE part, drawn
+alone from the picture and meshed on its own. No part is modelled in code. So split for the mesher: each part a
+simple, solid, self-contained shape it can read from one picture of that part alone - a barrel is one part, its muzzle
+device another, a rail another, each sight, each control, the magazine, the grip, the stock, the handguard, each
+wheel, each pod. Do not lump: never two barrels or four wheels in one part.
+For each part, "what" describes that part alone as it looks in the picture - its shape, its features, its colour and
+finish - and names the neighbours it is drawn WITHOUT. If it shows clearly different colours, set "keep_texture":
+true. Windows, windshields and canopies are "glass" zones of the part that carries them.
+"""
+
+
+def method_rule():
+    return ALL_VENDOR_RULE if config.ALL_VENDOR else CODE_OR_VENDOR_RULE
+
+
 def sample_colours(plan, threshold=0.1):
     """Every part's (and zone's) colour read off the approved side picture inside its own box - the median of the
     object's pixels there - instead of the planner's guess: the planner called a medium-grey stock and magazine light
@@ -237,7 +254,7 @@ def snap_to_silhouette(plan, threshold=0.1):
     fg = np.abs(a - back).max(axis=2) > threshold
     changed = []
     for p in plan["parts"]:
-        if p.get("method") != "code":
+        if p.get("method") != "code" and not config.ALL_VENDOR:
             continue
         x0, x1, zt, zb = p["side_box"]
         area = max(1e-9, (x1 - x0) * (zb - zt))
@@ -321,7 +338,7 @@ def validate_plan(raw, dims, max_parts=None):
             continue
         method = str(p.get("method") or "code").lower()
         part = {"name": name, "what": str(p.get("what") or name)[:400],
-                "method": method if method in ("code", "vendor") else "code",
+                "method": "vendor" if config.ALL_VENDOR else (method if method in ("code", "vendor") else "code"),
                 "side_box": [pct(v) for v in p["side_box"]], "front_span": [pct(v) for v in p["front_span"]],
                 "box_min": box_min, "box_max": box_max, "material": clean_material(p.get("material"))}
         if part["method"] == "vendor":
@@ -404,7 +421,7 @@ def make_plan(job, spec, side_src, front_src, mirror_side=False):
             '"front_span": [y_left, y_right],                   your estimate, percent of the full width (a centred part is symmetric about 50)')
         prompt = prompt.replace(' "notes": "anything the assembly must respect"}}',
                                 ' "overall_width_m": the object\'s full width in metres, "notes": "anything the assembly must respect"}}')
-    prompt = prompt.format(description=spec.description, category=spec.category, length_m=dims[0], height_m=dims[2],
+    prompt = prompt.format(method_rule=method_rule(), description=spec.description, category=spec.category, length_m=dims[0], height_m=dims[2],
                            width_m=dims[1], max_parts=config.ASSEMBLY_MAX_PARTS)
     last = None
     for attempt in range(2):

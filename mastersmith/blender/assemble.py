@@ -796,8 +796,8 @@ def align_to_body(parts, specs):
     could not pass (owner, 2026-09-28). First the body's bore (find_bore): the parts move onto it in both directions.
     Without one, the middle of the body's front section decides the sideways place. Every centreline part moves by the
     same amount, so a barrel and its muzzle device stay on one axis."""
-    vend = [(o, r) for o, r in parts if r["kind"] == "vendor"]
-    line = [(o, r) for o, r in parts if r["kind"] == "code" and (specs.get(r["name"]) or {}).get("centreline")]
+    line = [(o, r) for o, r in parts if (specs.get(r["name"]) or {}).get("centreline")]
+    vend = [(o, r) for o, r in parts if r["kind"] == "vendor" and (o, r) not in line]
     if not vend or not line:
         return []
     body = max(vend, key=lambda t: (t[1]["box_max"][0] - t[1]["box_min"][0]))[0]

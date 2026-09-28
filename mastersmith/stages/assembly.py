@@ -477,7 +477,7 @@ def build_vendor_part(job, spec, part, plan):
               and all(min(q["box_max"][i], part["box_max"][i]) - max(q["box_min"][i], part["box_min"][i]) > 0 for i in range(3))]
     leave_out = (" Leave out, they are modelled separately: %s." % ", ".join(others)) if others else ""
     register_to, yaw_sweep = None, False
-    body = is_body(part, plan)
+    body = is_body(part, plan) and not config.ALL_VENDOR      # all-vendor: every part, the biggest too, drawn alone
     if body:
         picture, erased = erased_body_picture(plan, part, os.path.join(out_dir, "picture_erased.png"))
         job.log("  part %s: the approved side picture with the code parts erased (%s)" % (name, ", ".join(erased) or "none"))
