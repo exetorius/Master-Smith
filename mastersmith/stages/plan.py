@@ -55,7 +55,14 @@ Answer JSON only:
   "method": "code" | "vendor",
   "side_box": [x_left, x_right, z_top, z_bottom],    percent of picture 1, tight around the part as seen from the side
   "front_span": [y_left, y_right],                   percent of picture 2 across, tight around the part as seen from the front
-  "material": {{"color": "#rrggbb as the camera sees it", "metal": true/false, "roughness": 0.0-1.0, "glass": false, "keep_texture": false}}}}],
+  "material": {{"color": "#rrggbb as the camera sees it", "finish": "polymer" | "rubber" | "metal" | "painted" | "glass" | "wood" | "fabric",
+               "metal": true/false, "roughness": 0.0-1.0, "glass": false, "keep_texture": false}},
+  "zones": [{{"name": "...", "side_box": [...], "front_span": [...], "material": {{...as above}}}}]}}],   vendor parts only
+ (zones: the areas of a vendor part that are a DIFFERENT material from the rest of it - a rubber grip or butt pad,
+ bare steel (bolt, pins, sight blades, a bare-metal receiver), a coloured panel, a lens. Each has its own tight
+ side_box and front_span (percent, like a part) and material. A real weapon is never one material: polymer furniture,
+ rubber grips and pads, blued or parkerised steel, anodised aluminium, glass optics. Give every such area a zone.
+ A lens or an optic's glass that should be see-through is a separate code part with "glass": true, not a zone.)
  (metal is true ONLY for bare metal - blued or parkerised steel, anodised aluminium, chrome. Anything painted, coated
  or plastic is metal false, even on a steel body: a painted truck panel is not metal.)
  "notes": "anything the assembly must respect"}}
@@ -224,13 +231,37 @@ def snap_to_silhouette(plan, threshold=0.1):
         # it is tall, whatever the front picture's end-on reading said
         W = plan["dims_m"][1]
         tall = p["box_max"][2] - p["box_min"][2]
-        if p["box_max"][1] - p["box_min"][1] < 0.8 * tall and W > 0:
+        # round: as wide as it is tall, the measured height deciding (a muzzle brake read 28.5 mm wide from the front
+        # picture against 21.9 mm tall came out oval, 2026-09-28)
+        if abs((p["box_max"][1] - p["box_min"][1]) - tall) > 0.05 * tall and W > 0:
             yc = (p["box_min"][1] + p["box_max"][1]) / 2
             p["front_span"] = [round(max(0.0, (yc - tall / 2 + W / 2) / W * 100), 2),
                                round(min(100.0, (yc + tall / 2 + W / 2) / W * 100), 2)]
             p["box_min"], p["box_max"] = to_metres(p["side_box"], p["front_span"], plan["dims_m"])
         changed.append((p["name"], band, nzb - nzt))
     return changed
+
+
+FINISHES = ("polymer", "rubber", "metal", "painted", "glass", "wood", "fabric")
+
+
+def clean_material(mat):
+    """A plan material with every key present: colour, finish, metal, roughness, glass, keep_texture. The finish
+    decides what the surface pass does (rubber: rough, stippled; metal: reflective, brushed; polymer: satin)."""
+    mat = mat if isinstance(mat, dict) else {}
+    colour = str(mat.get("color") or "#808080")
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", colour):
+        colour = "#808080"
+    try:
+        rough = min(1.0, max(0.05, float(mat.get("roughness", 0.6))))
+    except (TypeError, ValueError):
+        rough = 0.6
+    finish = str(mat.get("finish") or "").lower()
+    if finish not in FINISHES:
+        finish = "metal" if mat.get("metal") else "glass" if mat.get("glass") else "polymer"
+    return {"color": colour, "finish": finish, "metal": bool(mat.get("metal")) or finish == "metal",
+            "roughness": round(rough, 3), "glass": bool(mat.get("glass")) or finish == "glass",
+            "keep_texture": bool(mat.get("keep_texture"))}
 
 
 def validate_plan(raw, dims, max_parts=None):
@@ -248,20 +279,23 @@ def validate_plan(raw, dims, max_parts=None):
             dropped.append({"name": name, "reason": str(exc)})
             continue
         method = str(p.get("method") or "code").lower()
-        mat = p.get("material") if isinstance(p.get("material"), dict) else {}
-        colour = str(mat.get("color") or "#808080")
-        if not re.fullmatch(r"#[0-9a-fA-F]{6}", colour):
-            colour = "#808080"
-        try:
-            rough = min(1.0, max(0.05, float(mat.get("roughness", 0.6))))
-        except (TypeError, ValueError):
-            rough = 0.6
-        parts.append({"name": name, "what": str(p.get("what") or name)[:400],
-                      "method": method if method in ("code", "vendor") else "code",
-                      "side_box": [pct(v) for v in p["side_box"]], "front_span": [pct(v) for v in p["front_span"]],
-                      "box_min": box_min, "box_max": box_max,
-                      "material": {"color": colour, "metal": bool(mat.get("metal")), "roughness": round(rough, 3),
-                                   "glass": bool(mat.get("glass")), "keep_texture": bool(mat.get("keep_texture"))}})
+        part = {"name": name, "what": str(p.get("what") or name)[:400],
+                "method": method if method in ("code", "vendor") else "code",
+                "side_box": [pct(v) for v in p["side_box"]], "front_span": [pct(v) for v in p["front_span"]],
+                "box_min": box_min, "box_max": box_max, "material": clean_material(p.get("material"))}
+        if part["method"] == "vendor":
+            zones = []
+            for z in (p.get("zones") or [])[:12]:
+                if not isinstance(z, dict):
+                    continue
+                try:
+                    zmin, zmax = to_metres(z.get("side_box") or [], z.get("front_span") or p["front_span"], dims)
+                except (ValueError, TypeError):
+                    continue
+                zones.append({"name": clean_name(z.get("name"), set()), "box_min": zmin, "box_max": zmax,
+                              "side_box": [pct(v) for v in z["side_box"]], "material": clean_material(z.get("material"))})
+            part["zones"] = zones
+        parts.append(part)
     if len(parts) > max_parts:
         dropped += [{"name": p["name"], "reason": "over the %d-part limit" % max_parts} for p in parts[max_parts:]]
         parts = parts[:max_parts]

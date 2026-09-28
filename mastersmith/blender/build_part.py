@@ -55,6 +55,15 @@ def make_material(spec):
     base = hex_rgb(spec.get("color"))
     rough = float(spec.get("roughness", 0.6))
     metal = bool(spec.get("metal"))
+    finish = spec.get("finish") or ("metal" if metal else "polymer")
+    if metal:
+        # a metal's base colour is its reflectance: black steel still reflects about a fifth of the light
+        lum = 0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2]
+        if lum < 0.20:
+            base = tuple(min(1.0, c * 0.20 / max(lum, 1e-4)) for c in base)
+        rough = min(rough, 0.4)
+    elif finish == "rubber":
+        rough = max(rough, 0.85)
     bsdf.inputs["Metallic"].default_value = 1.0 if metal else 0.0
     coord = nt.nodes.new("ShaderNodeTexCoord")
     noise = nt.nodes.new("ShaderNodeTexNoise")

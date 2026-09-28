@@ -71,6 +71,9 @@ def fit(o, p):
         lo_c, hi_c = blib.dims(o)
         ext_c = hi_c - lo_c
         fill = [min(2.0, size[i] / ext_c[i]) if ext_c[i] > 1e-9 and size[i] / ext_c[i] > 1.08 else 1.0 for i in range(3)]
+        if p.get("centreline"):
+            # a round part scales evenly across its section: stretched one way only, the muzzle brake came out oval
+            fill[1] = fill[2] = math.sqrt(fill[1] * fill[2])
         if fill != [1.0, 1.0, 1.0]:
             o.data.transform(Matrix.Translation(-(lo_c + hi_c) * 0.5))
             o.data.transform(Matrix.Diagonal(Vector(fill).to_4d()))
@@ -131,7 +134,7 @@ def add_reference_detail(o, det):
             images[view] = img
     if "side" not in images:
         return False
-    for m in {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}:
+    for m in (mats if mats is not None else {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}):
         t = m.node_tree
         b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
         if b is None:
@@ -189,8 +192,10 @@ def add_reference_detail(o, det):
     return True
 
 
-def planned_linear(h):
-    """The plan's colour (#rrggbb) in linear RGB with the same albedo floor the code parts use (sRGB 45)."""
+def planned_linear(h, metal=False):
+    """The plan's colour (#rrggbb) in linear RGB with the same albedo floor the code parts use (sRGB 45). A metal's
+    base colour is how much it reflects: blued or black steel still reflects about a fifth of the light, so a metal is
+    lifted to that luminance, keeping its hue - near-black "black steel" rendered as dull graphite (2026-09-28)."""
     h = str(h or "").lstrip("#")
     if len(h) != 6:
         return None
@@ -198,7 +203,15 @@ def planned_linear(h):
     for i in (0, 2, 4):
         c = max(int(h[i:i + 2], 16) / 255.0, 45 / 255.0)
         out.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+    if metal:
+        lum = 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]
+        if lum < METAL_MIN_REFLECTANCE:
+            k = METAL_MIN_REFLECTANCE / max(lum, 1e-4)
+            out = [min(1.0, v * k) for v in out]
     return tuple(out)
+
+
+METAL_MIN_REFLECTANCE = 0.20
 
 
 def image_mean_luminance(img):
@@ -217,16 +230,16 @@ def image_mean_luminance(img):
     return float((rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)).mean())
 
 
-def tint_to_plan(o, colour):
+def tint_to_plan(o, colour, mats=None, metal=False):
     """A vendor part takes its planned colour, keeping its own light and dark variation: base colour = planned colour x
     (texel luminance / the texture's mean luminance), clamped. Tripo keeps a washed-out grey where the plan says matte
     black (the pistol frame, 2026-09-27); this is the part's material being set as planned while it is assembled, the
     shape and the texture's detail are the vendor's."""
-    lin = planned_linear(colour)
+    lin = planned_linear(colour, metal)
     if lin is None:
         return False
     done = False
-    for m in {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}:
+    for m in (mats if mats is not None else {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}):
         t = m.node_tree
         b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
         if b is None:
@@ -285,14 +298,16 @@ def tint_to_plan(o, colour):
     return done
 
 
-def surface_detail(o, mat, strength=1.0):
+def surface_detail(o, mat, strength=1.0, mats=None):
     """The material pass a texture artist gives a moulded or cast part, on a vendor seed before the bake: worn, lighter
     raised edges and darker recesses from the mesh's curvature (Cycles pointiness on the full-detail seed), a fine grain
     in the normal, and roughness that varies with it and polishes on the worn edges. A vendor's texture alone read as
     soft grey plastic on the bullpup (owner, 2026-09-27). Everything is procedural in object space, so it bakes into
     the atlas like the seed's own texture."""
     metal = bool(mat.get("metal"))
-    for m in {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}:
+    finish = mat.get("finish") or ("metal" if metal else "polymer")
+    rubber = finish == "rubber"
+    for m in (mats if mats is not None else {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}):
         t = m.node_tree
         b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
         if b is None:
@@ -356,11 +371,18 @@ def surface_detail(o, mat, strength=1.0):
         K.new(grime.outputs["Result"], base)
         # fine grain in the normal (polymer texture / cast or machined metal), chained onto any normal map the seed has
         grain = N.new("ShaderNodeTexNoise")
-        grain.inputs["Scale"].default_value = 900.0 if not metal else 1400.0
+        grain.inputs["Scale"].default_value = 1600.0 if rubber else 900.0 if not metal else 1400.0
         grain.inputs["Detail"].default_value = 4.0
-        K.new(coord.outputs["Object"], grain.inputs["Vector"])
+        if metal:
+            # brushed: the grain drawn out along the part's length
+            stretch = N.new("ShaderNodeMapping")
+            stretch.inputs["Scale"].default_value = (0.05, 1.0, 1.0)
+            K.new(coord.outputs["Object"], stretch.inputs["Vector"])
+            K.new(stretch.outputs["Vector"], grain.inputs["Vector"])
+        else:
+            K.new(coord.outputs["Object"], grain.inputs["Vector"])
         bump = N.new("ShaderNodeBump")
-        bump.inputs["Strength"].default_value = 0.35 * strength
+        bump.inputs["Strength"].default_value = (0.7 if rubber else 0.35) * strength
         bump.inputs["Distance"].default_value = 0.001
         K.new(grain.outputs["Fac"], bump.inputs["Height"])
         nrm = b.inputs["Normal"]
@@ -371,6 +393,10 @@ def surface_detail(o, mat, strength=1.0):
         rough = b.inputs["Roughness"]
         r_src = rough.links[0].from_socket if rough.is_linked else None
         r_base = float(mat.get("roughness", rough.default_value if not rough.is_linked else 0.6))
+        if rubber:
+            r_base = max(r_base, 0.85)                 # rubber: dead matte
+        elif metal:
+            r_base = min(r_base, 0.4)                  # bare metal: a real sheen
         var = N.new("ShaderNodeMapRange")
         var.inputs["To Min"].default_value = max(0.05, r_base - 0.12)
         var.inputs["To Max"].default_value = min(1.0, r_base + 0.08)
@@ -388,17 +414,56 @@ def surface_detail(o, mat, strength=1.0):
         polish.data_type = "FLOAT"
         K.new(wear2.outputs[0], polish.inputs["Factor"])
         K.new(r_out, polish.inputs["A"])
-        polish.inputs["B"].default_value = max(0.05, r_base - 0.35)
+        polish.inputs["B"].default_value = r_base if rubber else max(0.05, r_base - 0.35)   # rubber does not polish
         K.new(polish.outputs["Result"], rough)
     return True
 
 
-def surface_to_plan(o, mat):
+def split_zones(o, zones):
+    """A vendor part's material zones (plan: a rubber grip, bare steel, a coloured panel) as material slots of their
+    own: the faces whose centre lies in a zone's box get a copy of their material. -> [(zone, set of materials)], in
+    plan order; a later zone wins where two overlap. One material for a whole body read as graphite (2026-09-28)."""
+    if not zones:
+        return []
+    me = o.data
+    n = len(me.polygons)
+    centres = np.empty(n * 3, np.float32)
+    me.polygons.foreach_get("center", centres)
+    centres = centres.reshape(-1, 3)
+    idx = np.empty(n, np.int32)
+    me.polygons.foreach_get("material_index", idx)
+    if not o.material_slots:
+        return []
+    base = [sl.material for sl in o.material_slots]
+    out = []
+    for z in zones:
+        lo, hi = np.array(z["box_min"]), np.array(z["box_max"])
+        inside = np.all((centres >= lo) & (centres <= hi), axis=1)
+        if inside.sum() < 20:
+            continue
+        made = {}
+        for src in sorted(set(idx[inside])):
+            if src >= len(base) or base[src] is None:
+                continue
+            m = base[src].copy()
+            m.name = "%s_zone_%s" % (base[src].name, z.get("name", "zone"))
+            me.materials.append(m)
+            made[src] = len(me.materials) - 1
+        for src, dst in made.items():
+            sel = inside & (idx == src)
+            idx[sel] = dst
+        out.append((z, {me.materials[d] for d in made.values()}))
+    me.polygons.foreach_set("material_index", idx)
+    me.update()
+    return out
+
+
+def surface_to_plan(o, mat, mats=None):
     """A vendor part takes its planned roughness and metalness too: Tripo's maps made the bullpup's polymer body shine
     like metal (2026-09-27). The texture's roughness variation is kept, squeezed into planned +-0.1."""
     if "roughness" not in mat and "metal" not in mat:
         return False
-    for m in {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}:
+    for m in (mats if mats is not None else {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}):
         t = m.node_tree
         b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
         if b is None:
@@ -433,12 +498,23 @@ for p in args["parts"]:
     if p["kind"] == "code" and args.get("detail") and not (p.get("material") or {}).get("glass"):
         rec["reference_detail"] = add_reference_detail(o, args["detail"])
     if p["kind"] == "vendor" and not (p.get("material") or {}).get("glass") and args.get("tint_vendor", True):
+        zoned = split_zones(o, p.get("zones") or [])
+        in_zone = set().union(*[m for _z, m in zoned]) if zoned else set()
+        rest = {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree} - in_zone
+        pm = p.get("material") or {}
         # a multi-coloured body (grey with an olive panel) keeps the vendor's colours; its surface is still the plan's
-        if not (p.get("material") or {}).get("keep_texture"):
-            rec["tinted"] = tint_to_plan(o, (p.get("material") or {}).get("color"))
-        rec["surface_planned"] = surface_to_plan(o, p.get("material") or {})
+        if not pm.get("keep_texture"):
+            rec["tinted"] = tint_to_plan(o, pm.get("color"), rest, metal=bool(pm.get("metal")))
+        rec["surface_planned"] = surface_to_plan(o, pm, rest)
         if args.get("surface_detail", True):
-            rec["surface_detail"] = surface_detail(o, p.get("material") or {})
+            rec["surface_detail"] = surface_detail(o, pm, mats=rest)
+        for z, mats in zoned:
+            zm = z.get("material") or {}
+            tint_to_plan(o, zm.get("color"), mats, metal=bool(zm.get("metal")))
+            surface_to_plan(o, zm, mats)
+            if args.get("surface_detail", True):
+                surface_detail(o, zm, mats=mats)
+        rec["zones"] = [z.get("name") for z, _m in zoned]
     for slot in o.material_slots:
         if slot.material:
             slot.material.name = "MS_src_%s_%s" % (p["name"], slot.material.name)

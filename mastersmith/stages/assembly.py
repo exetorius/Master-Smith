@@ -676,7 +676,8 @@ def _assemble(job, spec, plan, built, round_no, reference):
         if not b:
             continue
         entry = {"name": p["name"], "kind": "code" if b.get("code") else "vendor", "box_min": p["box_min"],
-                 "box_max": p["box_max"], "material": p["material"], "centreline": bool(p.get("centreline"))}
+                 "box_max": p["box_max"], "material": p["material"], "centreline": bool(p.get("centreline")),
+                 "zones": p.get("zones") or []}
         if b.get("code") and any(is_body(q, plan) and _mostly_inside(p, q) for q in plan["parts"]):
             entry["cover"] = 1.03      # over the vendor body's own soft copy of it (kept in the body's picture)
         if b.get("code"):
