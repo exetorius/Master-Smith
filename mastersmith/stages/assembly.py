@@ -463,9 +463,16 @@ def build_vendor_part(job, spec, part, plan):
     others = [q["name"] for q in plan["parts"] if q["name"] != name and q.get("method") == "code"
               and all(min(q["box_max"][i], part["box_max"][i]) - max(q["box_min"][i], part["box_min"][i]) > 0 for i in range(3))]
     leave_out = (" Leave out, they are modelled separately: %s." % ", ".join(others)) if others else ""
+    register_to, yaw_sweep = None, False
     if is_body(part, plan):
         picture, erased = erased_body_picture(plan, part, os.path.join(out_dir, "picture_erased.png"))
         job.log("  part %s: the approved side picture with the code parts erased (%s)" % (name, ", ".join(erased) or "none"))
+        view = config.BODY_SEED_VIEW or ("side" if pricing.edit_model(spec).startswith("local/") else "three_quarter")
+        if view == "three_quarter":
+            quarter = _three_quarter(job, spec, part, plan, picture, erased, out_dir)
+            if quarter:
+                # the mesher gets depth from the three-quarter picture; the side picture still decides where it sits
+                register_to, yaw_sweep, picture = picture, True, quarter
     for attempt in range(0 if picture else 2):
         path = os.path.join(out_dir, "picture_%d.png" % attempt)
         # the SAME side view as the reference (forward to the right): its silhouette is what the seed is registered to
@@ -498,7 +505,7 @@ def build_vendor_part(job, spec, part, plan):
     ext = ".fbx" if mesh_url.split("?")[0].lower().endswith(".fbx") else ".glb"
     glb = os.path.join(out_dir, "seed" + ext)
     job.fal.download(mesh_url, glb)
-    registered = _register(job, name, glb, picture, out_dir) if ext == ".glb" else None
+    registered = _register(job, name, glb, register_to or picture, out_dir, yaw_sweep) if ext == ".glb" else None
     if registered:
         job.log("  part %s: seeded by %s, registered to its side picture (IoU %.2f, runner-up %.2f)" % (
             name, model.split("/")[0], registered["iou"], registered["runner_up_iou"]))
@@ -510,7 +517,47 @@ def build_vendor_part(job, spec, part, plan):
     return {"blend": oriented["blend"], "yaw": oriented.get("yaw", 0), "picture": picture, "seed": glb}
 
 
-def _register(job, name, glb, picture, out_dir):
+THREE_QUARTER_PROMPT = """Picture 1 is a side view of an object. Draw EXACTLY the same object - identical design, shape,
+proportions, colours, materials and every detail - seen from a three-quarter view: the camera about 35 degrees round
+from that side towards the object's front end and about 20 degrees above it, so its side, its front end and its top
+all show. The whole object in frame, isolated on a plain pure white background, even studio light, sharp product
+photograph, no shadows on the ground.%s"""
+
+
+def _three_quarter(job, spec, part, plan, side_picture, erased, out_dir):
+    """The body drawn from a three-quarter angle by the picture model, from its erased side picture (and the approved
+    front view when there is one): an image-to-3D model given a flat side profile has to guess all the depth (the
+    bullpup came out thin, 2026-09-27). Checked like any part picture; None when no good picture came."""
+    refs = [side_picture] + ([plan["front"]] if plan.get("front") else [])
+    missing = (" Picture 2 shows its front end. The object has NO %s: leave them out, the front end stops where "
+               "picture 1 stops." % ", ".join(erased)) if erased else ""
+    if not plan.get("front") and erased:
+        missing = " The object has NO %s: leave them out, the front end stops where picture 1 stops." % ", ".join(erased)
+    fixes = ""
+    for attempt in range(2):
+        path = os.path.join(out_dir, "picture_quarter_%d.png" % attempt)
+        try:
+            job.images.generate(THREE_QUARTER_PROMPT % (missing + (" " + fixes if fixes else "")), path,
+                                model=pricing.edit_model(spec), references=refs, aspect_ratio="4:3")
+        except Exception as exc:  # noqa: BLE001 - the side picture is the fallback
+            job.log("  part %s: no three-quarter picture (%s); seeding from the side" % (part["name"], str(exc)[:120]))
+            return None
+        j = extract_json(job.llm.vision(QUARTER_CHECK.format(what=part["what"]), [side_picture, path])) or {}
+        if j.get("ok") and int(j.get("score", 0) or 0) >= 6:
+            job.log("  part %s: seeded from a three-quarter picture (check %s/10)" % (part["name"], j.get("score")))
+            return path
+        fixes = str(j.get("fixes") or "")
+    job.log("  part %s: the three-quarter pictures drifted from the design; seeding from the side" % part["name"])
+    return None
+
+
+QUARTER_CHECK = """Picture 1 is the approved side view of an object: {what}. Picture 2 should be the SAME object from a
+three-quarter view. Is it the same design (same shape, proportions, parts, colours), whole, on a plain background,
+and does it show the side, the front end and the top? Answer JSON only:
+{{"ok": true/false, "score": 0-10, "fixes": "what to change, if anything"}}"""
+
+
+def _register(job, name, glb, picture, out_dir, yaw_sweep=False):
     """The seed turned so its side silhouette matches the part's side picture (blender/register_part.py). -> result or None."""
     try:
         import numpy as np
@@ -523,7 +570,8 @@ def _register(job, name, glb, picture, out_dir):
         Image.fromarray((fg * 255).astype("uint8")).save(mask)
         res_path = os.path.join(out_dir, "registration.json")
         blend = os.path.join(out_dir, "registered.blend")
-        _blender(job, "register_part.py", {"glb": glb, "mask": mask, "out_blend": blend, "out_json": res_path},
+        _blender(job, "register_part.py", {"glb": glb, "mask": mask, "out_blend": blend, "out_json": res_path,
+                                           "yaw_sweep": bool(yaw_sweep)},
                  "register_%s" % name, timeout=600)
         res = json.load(open(res_path))
         if res.get("iou", 0) < 0.35:

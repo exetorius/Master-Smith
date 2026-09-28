@@ -91,14 +91,16 @@ def picture_catalogue():
 
 def edit_model(spec=None):
     """The picture model for edits and extra views: the build's choice, else the configured editor."""
-    if config.NO_SPEND:
-        return config.LOCAL_PICTURE_MODEL
     chosen = getattr(spec, "picture_model", None) if spec is not None else None
+    if config.NO_SPEND:
+        if not config.PAID_PICTURES:
+            return config.LOCAL_PICTURE_MODEL
+        return chosen if chosen in IMAGE_PRICES and not chosen.startswith(("google/", "openai/")) else config.EDIT_MODEL
     return chosen if chosen in IMAGE_PRICES else config.EDIT_MODEL
 
 
 def concept_model(spec):
-    if config.NO_SPEND:
+    if config.NO_SPEND and not config.PAID_PICTURES:
         return config.LOCAL_PICTURE_MODEL
     chosen = getattr(spec, "picture_model", None)
     if chosen in IMAGE_PRICES:

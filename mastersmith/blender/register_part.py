@@ -137,6 +137,18 @@ mode = "upright"
 if scores[0][1] < 0.5:
     scores = score_all(rotations())
     mode = "any"
+if args.get("yaw_sweep"):
+    # a seed made from a three-quarter picture comes out turned by that view's angle, not by a multiple of 90 degrees:
+    # sweep the turn about the vertical in 5 degree steps, then 1 degree around the best
+    def rz(deg):
+        a = np.radians(deg)
+        return np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
+    coarse = score_all([rz(d) for d in range(0, 360, 5)])
+    b = coarse[0]
+    deg0 = next(d for d in range(0, 360, 5) if np.allclose(rz(d), b[3]))
+    fine = score_all([rz(deg0 + d) for d in range(-4, 5)])
+    scores = sorted(fine + coarse[1:], key=lambda s: -s[0])
+    mode = "yaw_sweep"
 best = scores[0]
 bpy.data.objects.remove(probe, do_unlink=True)
 R = Matrix([list(r) + [0] for r in best[3]] + [[0, 0, 0, 1]])
@@ -147,6 +159,6 @@ ob.name = "Part"
 bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath(args["out_blend"]), compress=True)
 result = {"mode": mode, "iou": round(float(best[1]), 3), "score": round(float(best[0]), 3), "aspect": round(float(best[2]), 3),
           "target_aspect": round(float(t_aspect), 3), "runner_up_iou": round(float(scores[1][1]), 3),
-          "rotation": [[int(v) for v in row] for row in best[3]]}
+          "rotation": [[round(float(v), 4) if mode == "yaw_sweep" else int(v) for v in row] for row in best[3]]}
 json.dump(result, open(args["out_json"], "w"), indent=1)
 print("[register] best IoU %.3f (aspect %.2f vs %.2f), runner-up %.3f" % (best[1], best[2], t_aspect, scores[1][1]), flush=True)

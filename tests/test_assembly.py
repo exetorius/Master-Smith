@@ -160,6 +160,42 @@ def test_a_turned_vendor_seed_is_registered_back_to_its_side_picture():
 
 
 @BLENDER
+def test_a_seed_turned_by_an_odd_angle_is_found_by_the_yaw_sweep():
+    """A seed made from a three-quarter picture comes out turned by an odd angle: the yaw sweep turns it back."""
+    from PIL import Image, ImageDraw
+    with tempfile.TemporaryDirectory() as d:
+        make = os.path.join(d, "make.py")
+        glb = os.path.join(d, "seed.glb")
+        open(make, "w").write(
+            "import bpy, bmesh, math, sys\n"
+            "bpy.ops.wm.read_factory_settings(use_empty=True)\n"
+            "me = bpy.data.meshes.new('L'); bm = bmesh.new()\n"
+            "pts = [(0, 0), (0.03, 0), (0.03, 0.08), (0.06, 0.08), (0.06, 0.1), (0, 0.1)]\n"   # x forward, z up
+            "a = [bm.verts.new((x, -0.01, z)) for x, z in pts]; b = [bm.verts.new((x, 0.01, z)) for x, z in pts]\n"
+            "bm.faces.new(a); bm.faces.new(list(reversed(b)))\n"
+            "for i in range(6): bm.faces.new((a[i], a[(i + 1) % 6], b[(i + 1) % 6], b[i]))\n"
+            "bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:]); bm.to_mesh(me)\n"
+            "o = bpy.data.objects.new('L', me); bpy.context.collection.objects.link(o)\n"
+            "o.rotation_euler = (0, 0, math.radians(40)); bpy.context.view_layer.update()\n"
+            "o.select_set(True); bpy.context.view_layer.objects.active = o\n"
+            "bpy.ops.object.transform_apply(rotation=True)\n"
+            "bpy.ops.export_scene.gltf(filepath=sys.argv[sys.argv.index('--') + 1], use_selection=True, export_format='GLB')\n")
+        r = subprocess.run([config.BLENDER_BIN, *config.BLENDER_FLAGS, "--python", make, "--", glb], capture_output=True, text=True, timeout=300)
+        assert r.returncode == 0, r.stderr[-1500:]
+        mask = Image.new("L", (600, 1000), 0)                       # the silhouette as drawn: forward to the right
+        ImageDraw.Draw(mask).polygon([(0, 1000), (300, 1000), (300, 200), (600, 200), (600, 0), (0, 0)], fill=255)
+        mask.save(os.path.join(d, "mask.png"))
+        a = os.path.join(d, "reg.json")
+        json.dump({"glb": glb, "mask": os.path.join(d, "mask.png"), "out_blend": os.path.join(d, "r.blend"),
+                   "out_json": os.path.join(d, "res.json"), "yaw_sweep": True}, open(a, "w"))
+        _blender("register_part.py", a)
+        res = json.load(open(os.path.join(d, "res.json")))
+        assert res["mode"] == "yaw_sweep" and res["iou"] > 0.9
+        import math as _m
+        assert abs(_m.degrees(_m.atan2(res["rotation"][1][0], res["rotation"][0][0])) % 360 - 320) <= 3   # turned back 40
+
+
+@BLENDER
 def test_code_parts_build_and_assemble_into_a_game_ready_asset():
     with tempfile.TemporaryDirectory() as d:
         parts = []

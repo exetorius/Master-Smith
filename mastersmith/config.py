@@ -55,6 +55,13 @@ CODEX_MODEL = os.environ.get("MASTERSMITH_CODEX_MODEL", "")                 # em
 # No spending at all: every paid fal / OpenRouter call is refused before it is made, pictures and meshes run on this
 # PC (local/ ids), the model calls need a CLI backend, and paid-only steps (rigging, texture tiles) are skipped.
 NO_SPEND = os.environ.get("MASTERSMITH_NO_SPEND", "0") == "1"
+# ...except pictures: with this on, the fal picture models (Nano Banana) still run under no-spend. They keep a design
+# far better than the local FLUX.2 klein, and a build draws few (owner, 2026-09-27: "we should use nano banana").
+PAID_PICTURES = os.environ.get("MASTERSMITH_PAID_PICTURES", "0") == "1"
+# The assembled body's seed picture: "three_quarter" (drawn by the picture model from the approved side view, the
+# mesher gets depth) or "side" (the approved side picture with the code parts erased: exact, but no depth). Empty =
+# three_quarter when the picture model is not the local one.
+BODY_SEED_VIEW = os.environ.get("MASTERSMITH_BODY_SEED_VIEW", "").strip().lower()
 DIRECTOR_MODEL = os.environ.get("MASTERSMITH_DIRECTOR_MODEL", "google/gemini-3.8-flash")
 VISION_MODEL = os.environ.get("MASTERSMITH_VISION_MODEL", "google/gemini-3.8-flash")
 PREMIUM_MODEL = os.environ.get("MASTERSMITH_PREMIUM_MODEL", "anthropic/claude-sonnet-5")

@@ -415,7 +415,10 @@ def model_options(all_models=False):
     if config.NO_SPEND:
         # nothing paid can run: offer only what does (the models on this PC), marked as the default
         vendors = [dict(v, default=True) for v in vendors if v["key"] == "local"]
-        pictures = [dict(pm, default=True) for pm in pictures if pm["id"].startswith("local/")]
+        if config.PAID_PICTURES:                         # fal's picture models (Nano Banana) and the local one
+            pictures = [pm for pm in pictures if pm["id"].startswith(("fal-ai/", "local/"))]
+        else:
+            pictures = [dict(pm, default=True) for pm in pictures if pm["id"].startswith("local/")]
     return {"seed_vendors": vendors,
             "picture_models": pictures,
             "director_models": director, "all_models": all_models, "no_spend": config.NO_SPEND,
@@ -423,7 +426,8 @@ def model_options(all_models=False):
             "pictures": {"concept": config.CONCEPT_MODEL, "concept_hard_surface": config.CONCEPT_MODEL_HARD,
                          "concept_premium": config.CONCEPT_MODEL_PREMIUM, "edit": config.EDIT_MODEL, "vision": config.VISION_MODEL},
             "defaults": {"seed_vendor": pricing.seed_vendor(Spec(name="X", description="x"))["key"], "director_model": config.DIRECTOR_MODEL,
-                         "picture_model": config.LOCAL_PICTURE_MODEL if config.NO_SPEND else config.CONCEPT_MODEL}}
+                         "picture_model": config.LOCAL_PICTURE_MODEL if config.NO_SPEND and not config.PAID_PICTURES
+                         else config.CONCEPT_MODEL}}
 
 
 def _attachment_note(attachments):

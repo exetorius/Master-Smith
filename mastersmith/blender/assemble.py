@@ -238,6 +238,13 @@ def tint_to_plan(o, colour):
         mean = image_mean_luminance(img) if img is not None else None
         if not mean or mean <= 1e-4:
             continue
+        want = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+        if 0.5 <= mean / max(want, 1e-4) <= 2.0:
+            # the vendor's texture is already about the planned tone: keep it, with its own colour separation (the
+            # TRELLIS pistol's black slide against its frame, its stippled grip) - the tint is for washed-out seeds
+            # like Tripo's grey frame
+            t.nodes.remove(rgb)
+            continue
         bw = t.nodes.new("ShaderNodeRGBToBW")
         t.links.new(src, bw.inputs[0])
         ratio = t.nodes.new("ShaderNodeMath")

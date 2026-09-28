@@ -15,6 +15,14 @@ QUEUE = "https://queue.fal.run"
 UPLOAD_INIT = "https://rest.alpha.fal.ai/storage/upload/initiate"
 
 
+def _is_picture_model(model):
+    """A fal picture endpoint (Nano Banana and friends, their /edit), the one thing MASTERSMITH_PAID_PICTURES lets
+    through no-spend."""
+    from .pricing import IMAGE_PRICES
+    base = model[:-5] if model.endswith("/edit") else model
+    return model.startswith("fal-ai/") and (model in IMAGE_PRICES or base in IMAGE_PRICES)
+
+
 class FalError(Exception):
     def __init__(self, message, status=None):
         super().__init__(message)
@@ -49,7 +57,7 @@ class Fal:
         usd = price(model, payload)          # refuses unpriced endpoints before any money moves
         if model.startswith("local/"):
             return self._run_local(model, payload, usd)
-        if config.NO_SPEND:
+        if config.NO_SPEND and not (config.PAID_PICTURES and _is_picture_model(model)):
             raise FalError("MASTERSMITH_NO_SPEND=1: the paid call %s was refused (nothing was spent)" % model, 402)
         t0 = time.time()
         r = self._retry(lambda: self.http.post("%s/%s" % (QUEUE, model), headers=self._h(),
@@ -103,7 +111,7 @@ class Fal:
         return local.seed_output(glb)
 
     def upload(self, path, mime=None):
-        if config.NO_SPEND:                  # the local models read files: no fal storage, no fal key needed
+        if config.NO_SPEND and not config.PAID_PICTURES:   # the local models read files: no fal storage needed
             url = "file:///" + os.path.abspath(path).replace("\\", "/")
             self.uploads[url] = os.path.abspath(path)
             return url
