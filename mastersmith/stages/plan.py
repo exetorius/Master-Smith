@@ -34,6 +34,9 @@ For each part choose how it is built. The vendor models almost everything; code 
     round knobs and bolt handles, exhaust tips, round lenses' housings, wheel hubs
   * repeated machined parts: Picatinny / M-LOK rails, rail covers with regular slots, cooling-fin stacks
   * small hardware: exposed pins, screw heads and rivets that matter at game distance
+  * controls that stick out SIDEWAYS on one side only: a charging handle, a selector lever, a bolt or magazine release,
+    a side knob. The vendor sees one side and mirrors them onto the other (the bullpup came out with its charging
+    handle on both sides), so code builds them on the right side only
   Code parts are modelled in code from primitives; everything irregular, moulded, curved or busy with small features
   comes out better from the vendor.
 - "vendor": an AI image-to-3D model. EVERYTHING else is ONE vendor part, the body: the housing or receiver, stock,

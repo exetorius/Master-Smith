@@ -277,6 +277,114 @@ def tint_to_plan(o, colour):
     return done
 
 
+def surface_detail(o, mat, strength=1.0):
+    """The material pass a texture artist gives a moulded or cast part, on a vendor seed before the bake: worn, lighter
+    raised edges and darker recesses from the mesh's curvature (Cycles pointiness on the full-detail seed), a fine grain
+    in the normal, and roughness that varies with it and polishes on the worn edges. A vendor's texture alone read as
+    soft grey plastic on the bullpup (owner, 2026-09-27). Everything is procedural in object space, so it bakes into
+    the atlas like the seed's own texture."""
+    metal = bool(mat.get("metal"))
+    for m in {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}:
+        t = m.node_tree
+        b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if b is None:
+            continue
+        N, K = t.nodes, t.links
+        geo = N.new("ShaderNodeNewGeometry")
+        coord = N.new("ShaderNodeTexCoord")
+        # curvature: pointiness is ~0.5 on flat areas, higher on convex edges, lower in concave recesses
+        edge = N.new("ShaderNodeMapRange")
+        edge.inputs["From Min"].default_value = 0.52       # a dense seed's curvature sits close to 0.5: only the
+        edge.inputs["From Max"].default_value = 0.57       # sharpest edges wear (0.505 turned the whole body chalky)
+        K.new(geo.outputs["Pointiness"], edge.inputs["Value"])
+        cavity = N.new("ShaderNodeMapRange")
+        cavity.inputs["From Min"].default_value = 0.485
+        cavity.inputs["From Max"].default_value = 0.44
+        K.new(geo.outputs["Pointiness"], cavity.inputs["Value"])
+        # a broken-up wear mask: edges wear unevenly
+        wear_noise = N.new("ShaderNodeTexNoise")
+        wear_noise.inputs["Scale"].default_value = 60.0
+        wear_noise.inputs["Detail"].default_value = 8.0
+        K.new(coord.outputs["Object"], wear_noise.inputs["Vector"])
+        patches = N.new("ShaderNodeMapRange")           # wear in broken patches, not along every edge
+        patches.inputs["From Min"].default_value = 0.48
+        patches.inputs["From Max"].default_value = 0.66
+        K.new(wear_noise.outputs["Fac"], patches.inputs["Value"])
+        wear = N.new("ShaderNodeMath")
+        wear.operation = "MULTIPLY"
+        wear.use_clamp = True
+        K.new(edge.outputs["Result"], wear.inputs[0])
+        K.new(patches.outputs["Result"], wear.inputs[1])
+        wear2 = N.new("ShaderNodeMath")
+        wear2.operation = "MULTIPLY"
+        wear2.use_clamp = True
+        K.new(wear.outputs[0], wear2.inputs[0])
+        wear2.inputs[1].default_value = 0.8 * strength
+        # base colour: lighter on the worn edges, darker in the recesses
+        base = b.inputs["Base Color"]
+        if base.is_linked:
+            src = base.links[0].from_socket
+        else:
+            rgb = N.new("ShaderNodeRGB")
+            rgb.outputs[0].default_value = tuple(base.default_value)
+            src = rgb.outputs[0]
+        lighten = N.new("ShaderNodeMix")
+        lighten.data_type = "RGBA"
+        lighten.blend_type = "SCREEN"
+        K.new(wear2.outputs[0], lighten.inputs["Factor"])
+        K.new(src, lighten.inputs["A"])
+        lighten.inputs["B"].default_value = (0.50, 0.50, 0.47, 1.0) if metal else (0.26, 0.26, 0.25, 1.0)
+        grime = N.new("ShaderNodeMix")
+        grime.data_type = "RGBA"
+        grime.blend_type = "MULTIPLY"
+        gf = N.new("ShaderNodeMath")
+        gf.operation = "MULTIPLY"
+        gf.use_clamp = True
+        K.new(cavity.outputs["Result"], gf.inputs[0])
+        gf.inputs[1].default_value = 0.55 * strength
+        K.new(gf.outputs[0], grime.inputs["Factor"])
+        K.new(lighten.outputs["Result"], grime.inputs["A"])
+        grime.inputs["B"].default_value = (0.45, 0.44, 0.43, 1.0)
+        K.new(grime.outputs["Result"], base)
+        # fine grain in the normal (polymer texture / cast or machined metal), chained onto any normal map the seed has
+        grain = N.new("ShaderNodeTexNoise")
+        grain.inputs["Scale"].default_value = 900.0 if not metal else 1400.0
+        grain.inputs["Detail"].default_value = 4.0
+        K.new(coord.outputs["Object"], grain.inputs["Vector"])
+        bump = N.new("ShaderNodeBump")
+        bump.inputs["Strength"].default_value = 0.35 * strength
+        bump.inputs["Distance"].default_value = 0.001
+        K.new(grain.outputs["Fac"], bump.inputs["Height"])
+        nrm = b.inputs["Normal"]
+        if nrm.is_linked:
+            K.new(nrm.links[0].from_socket, bump.inputs["Normal"])
+        K.new(bump.outputs["Normal"], nrm)
+        # roughness: varied by the grain, polished where the edges are worn
+        rough = b.inputs["Roughness"]
+        r_src = rough.links[0].from_socket if rough.is_linked else None
+        r_base = float(mat.get("roughness", rough.default_value if not rough.is_linked else 0.6))
+        var = N.new("ShaderNodeMapRange")
+        var.inputs["To Min"].default_value = max(0.05, r_base - 0.12)
+        var.inputs["To Max"].default_value = min(1.0, r_base + 0.08)
+        K.new(wear_noise.outputs["Fac"], var.inputs["Value"])
+        if r_src is not None:
+            avg = N.new("ShaderNodeMix")
+            avg.data_type = "FLOAT"
+            avg.inputs["Factor"].default_value = 0.5
+            K.new(r_src, avg.inputs["A"])
+            K.new(var.outputs["Result"], avg.inputs["B"])
+            r_out = avg.outputs["Result"]
+        else:
+            r_out = var.outputs["Result"]
+        polish = N.new("ShaderNodeMix")
+        polish.data_type = "FLOAT"
+        K.new(wear2.outputs[0], polish.inputs["Factor"])
+        K.new(r_out, polish.inputs["A"])
+        polish.inputs["B"].default_value = max(0.05, r_base - 0.35)
+        K.new(polish.outputs["Result"], rough)
+    return True
+
+
 def surface_to_plan(o, mat):
     """A vendor part takes its planned roughness and metalness too: Tripo's maps made the bullpup's polymer body shine
     like metal (2026-09-27). The texture's roughness variation is kept, squeezed into planned +-0.1."""
@@ -321,6 +429,8 @@ for p in args["parts"]:
         if not (p.get("material") or {}).get("keep_texture"):
             rec["tinted"] = tint_to_plan(o, (p.get("material") or {}).get("color"))
         rec["surface_planned"] = surface_to_plan(o, p.get("material") or {})
+        if args.get("surface_detail", True):
+            rec["surface_detail"] = surface_detail(o, p.get("material") or {})
     for slot in o.material_slots:
         if slot.material:
             slot.material.name = "MS_src_%s_%s" % (p["name"], slot.material.name)

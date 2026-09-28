@@ -536,10 +536,17 @@ def _three_quarter(job, spec, part, plan, side_picture, erased, out_dir):
     front view when there is one): an image-to-3D model given a flat side profile has to guess all the depth (the
     bullpup came out thin, 2026-09-27). Checked like any part picture; None when no good picture came."""
     refs = [side_picture] + ([plan["front"]] if plan.get("front") else [])
-    missing = (" Picture 2 shows its front end. The object has NO %s: leave them out, the front end stops where "
-               "picture 1 stops." % ", ".join(erased)) if erased else ""
-    if not plan.get("front") and erased:
-        missing = " The object has NO %s: leave them out, the front end stops where picture 1 stops." % ", ".join(erased)
+    # every part code builds is left out of the drawing (tiny pins and screws aside): what the mesher does not see it
+    # cannot mirror onto the hidden side or model twice
+    code = [q for q in plan["parts"] if q.get("method") == "code"
+            and not ((q["side_box"][1] - q["side_box"][0]) < 5 and (q["side_box"][3] - q["side_box"][2]) < 5)]
+    leave = ["%s (%s)" % (q["name"], q["what"].split(",")[0].split(";")[0][:80]) for q in code]
+    missing = (" Leave OUT these parts, they are made separately - draw the object without them, with a clean surface "
+               "where they attach: %s." % "; ".join(leave)) if leave else ""
+    if erased:
+        missing += " The front end stops where picture 1 stops."
+    if plan.get("front"):
+        missing = " Picture 2 shows its front end." + missing
     fixes = ""
     for attempt in range(2):
         path = os.path.join(out_dir, "picture_quarter_%d.png" % attempt)
