@@ -216,7 +216,7 @@ def test_code_parts_build_and_assemble_into_a_game_ready_asset():
         _blender("assemble.py", a)
         rep = json.load(open(os.path.join(d, "out", "report.json")))
         assert {m["role"] for m in rep["maps"]} == {"BC", "N", "ORM"}
-        assert rep["dimensions_m"][0] == pytest.approx(0.3, abs=0.005) and rep["dimensions_m"][2] == pytest.approx(0.095, abs=0.004)
+        assert rep["dimensions_m"][0] == pytest.approx(0.3, abs=0.005) and rep["dimensions_m"][2] == pytest.approx(0.11, abs=0.004)   # parts fill their boxes
         assert [l["lod"] for l in rep["lods"]] == [0, 1, 2] and rep["collision"]["triangles"] <= 256
         assert set(rep["check_renders"]) == {"left", "front", "top"} and len(rep["detail_renders"]) == 2
         six = os.path.join(d, "six.json")

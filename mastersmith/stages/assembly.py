@@ -332,8 +332,7 @@ def build_code_part(job, spec, part, plan):
             # the number the eye misses: a barrel built half as thick as the picture's still "looks like a barrel"
             refine = ("Measured: your side silhouette covers the reference's inside this box with an overlap of %.2f "
                       "(1.00 = identical). Below about 0.75 the part is too thin, too short or in the wrong place: the box "
-                      "is the part's tight bounds and its widest section fills it.
-" % best["fit"]) + refine
+                      "is the part's tight bounds and its widest section fills it.\n" % best["fit"]) + refine
         if not front_sq:
             refine = "(There is no front picture: the comparison has only the SIDE row.)\n" + refine
         text = job.llm.vision(refine, [cmp],
