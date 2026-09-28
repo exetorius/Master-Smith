@@ -19,3 +19,4 @@ web/out/
 web/.env*.local
 web/next-env.d.ts
 web/*.tsbuildinfo
+chats/

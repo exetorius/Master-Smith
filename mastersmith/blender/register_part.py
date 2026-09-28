@@ -150,11 +150,15 @@ if args.get("yaw_sweep"):
     def extents(t):
         v = verts @ rz(t).T
         return np.ptp(v[:, 1]), np.ptp(v[:, 0])          # width seen from the front, length seen from the side
-    t0 = min(range(0, 180), key=lambda t: extents(t)[0])
+    widths = [extents(t)[0] for t in range(0, 180)]
+    t0 = min(range(0, 180), key=lambda t: widths[t])
     t0 = min((t0 + e * 0.1 for e in range(-10, 11)), key=lambda t: extents(t)[0])
     width, length = extents(t0)
-    if length > 1.8 * width:
-        scores = score_all([rz(t0), rz(t0 + 180)])      # aligned; the silhouette picks the forward end
+    # a part that is clearly thinner one way than the other (a barrel, a magazine, a grip, a rail) faces its thin side
+    # to the front: the yaw that makes it thinnest seen from the front, then the silhouette picks which end is
+    # forward. Length alone missed tall flat parts: the magazine settled on a 45 degree yaw (2026-09-28).
+    if width < 0.6 * max(widths):
+        scores = score_all([rz(t0), rz(t0 + 180)])
         mode = "long_axis"
     else:
         coarse = score_all([rz(d) for d in range(0, 360, 5)])
@@ -164,11 +168,32 @@ if args.get("yaw_sweep"):
         scores = sorted(fine + coarse[1:], key=lambda s: -s[0])
         mode = "yaw_sweep"
 best = scores[0]
+if args.get("yaw_sweep"):
+    # a part seeded from a three-quarter picture can also come out PITCHED (turned in the side plane): the magazine
+    # lay at 45 degrees and no yaw could fix it (2026-09-28). The side silhouette measures pitch directly.
+    def ry(deg):
+        a = np.radians(deg)
+        return np.array([[np.cos(a), 0, np.sin(a)], [0, 1, 0], [-np.sin(a), 0, np.cos(a)]])
+    base = best[3]
+    pitched = score_all([ry(d) @ base for d in range(-75, 76, 5)])
+    if pitched[0][1] > best[1] + 0.02:
+        d0 = next(d for d in range(-75, 76, 5) if np.allclose(ry(d) @ base, pitched[0][3]))
+        fine = score_all([ry(d0 + e) @ base for e in range(-4, 5)])
+        best = fine[0]
+        mode += "+pitch"
+if args.get("extra_yaw") or args.get("extra_pitch"):
+    # a person's correction after looking at seed_render.png: degrees about the vertical, then in the side plane
+    ay, ap_ = np.radians(float(args.get("extra_yaw") or 0)), np.radians(float(args.get("extra_pitch") or 0))
+    ryaw = np.array([[np.cos(ay), -np.sin(ay), 0], [np.sin(ay), np.cos(ay), 0], [0, 0, 1]])
+    rpit = np.array([[np.cos(ap_), 0, np.sin(ap_)], [0, 1, 0], [-np.sin(ap_), 0, np.cos(ap_)]])
+    rot = rpit @ ryaw @ best[3]
+    best = score_all([rot])[0]
+    mode += "+manual"
 bpy.data.objects.remove(probe, do_unlink=True)
 R = Matrix([list(r) + [0] for r in best[3]] + [[0, 0, 0, 1]])
 ob.data.transform(R)
 shear = 0.0
-if mode == "long_axis":
+if mode == "long_axis" and best[2] > 1.8:                 # long along X: the perspective slant is along the length
     # a seed made from a three-quarter picture comes out slanted: the picture's perspective (the near end drawn bigger)
     # reads as depth, and the bullpup body's centreline drifted 43% of its width from butt to muzzle, the sights and
     # the grip off the barrel's line (2026-09-27). The drift is a straight line along the length: sheared out.
@@ -197,6 +222,6 @@ if args.get("out_render"):
     st.close()
 result = {"mode": mode, "iou": round(float(best[1]), 3), "score": round(float(best[0]), 3), "aspect": round(float(best[2]), 3),
           "target_aspect": round(float(t_aspect), 3), "runner_up_iou": round(float(scores[1][1]), 3), "shear": round(shear, 4),
-          "rotation": [[round(float(v), 4) if mode in ("yaw_sweep", "long_axis") else int(v) for v in row] for row in best[3]]}
+          "rotation": [[round(float(v), 4) if mode != "upright" and mode != "any" else int(v) for v in row] for row in best[3]]}
 json.dump(result, open(args["out_json"], "w"), indent=1)
 print("[register] best IoU %.3f (aspect %.2f vs %.2f), runner-up %.3f" % (best[1], best[2], t_aspect, scores[1][1]), flush=True)

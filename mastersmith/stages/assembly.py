@@ -586,7 +586,7 @@ and does it show the side, the front end and the top? Answer JSON only:
 {{"ok": true/false, "score": 0-10, "fixes": "what to change, if anything"}}"""
 
 
-def _register(job, name, glb, picture, out_dir, yaw_sweep=False):
+def _register(job, name, glb, picture, out_dir, yaw_sweep=False, extra_yaw=0.0, extra_pitch=0.0):
     """The seed turned so its side silhouette matches the part's side picture (blender/register_part.py). -> result or None."""
     try:
         import numpy as np
@@ -601,7 +601,8 @@ def _register(job, name, glb, picture, out_dir, yaw_sweep=False):
         blend = os.path.join(out_dir, "registered.blend")
         render = os.path.join(out_dir, "seed_render.png")
         _blender(job, "register_part.py", {"glb": glb, "mask": mask, "out_blend": blend, "out_json": res_path,
-                                           "yaw_sweep": bool(yaw_sweep), "out_render": render},
+                                           "yaw_sweep": bool(yaw_sweep), "out_render": render,
+                                           "extra_yaw": extra_yaw, "extra_pitch": extra_pitch},
                  "register_%s" % name, timeout=600)
         res = json.load(open(res_path))
         if res.get("iou", 0) < 0.35:
@@ -689,7 +690,13 @@ def _assemble(job, spec, plan, built, round_no, reference):
         if b.get("code"):
             entry.update({"blend": b["blend"]} if b.get("blend") and os.path.exists(b["blend"]) else {"glb": b["glb"]})
         else:
-            entry.update({"blend": b["blend"], "yaw": b.get("yaw", 0), "keep_depth": bool(b.get("keep_depth"))})
+            # only the largest vendor part keeps the mesher's depth: a small part seeded from a three-quarter picture
+            # comes out fat (the magazine, 2026-09-28) and its box, read off the picture, is the better width
+            largest = max((q for q in plan["parts"] if q.get("method") == "vendor"),
+                          key=lambda q: q["box_max"][0] - q["box_min"][0], default=None)
+            is_largest = largest is not None and largest["name"] == p["name"]
+            entry.update({"blend": b["blend"], "yaw": b.get("yaw", 0), "keep_depth": bool(b.get("keep_depth")) and is_largest,
+                          "fill_box": not is_largest})
         parts.append(entry)
     out = os.path.join(job.dir, "delivery") if round_no == "final" else os.path.join(job.work_dir, "assembly_%s" % round_no)
     _blender(job, "assemble.py", {"name": spec.name, "out_dir": out, "tri_budget": spec.tri_budget, "engine": spec.engine,

@@ -92,6 +92,8 @@ def fit(o, p):
     # (2026-09-27). A part more than 1.8x out of proportion with its box is kept in proportion on that axis instead.
     s = sorted(ratios)[1]
     scale = [r if r / s <= 1.8 and s / r <= 1.8 else s for r in ratios]
+    if p.get("fill_box"):
+        scale = list(ratios)                      # a small part: its box, read off the picture, rules on every side
     if p.get("keep_depth"):
         # seeded from a three-quarter picture, the vendor saw the part's real depth: its width keeps the length and
         # height scale instead of being stretched to the planned front span, which counts every protrusion (the
@@ -227,7 +229,11 @@ def image_mean_luminance(img):
         rgb = np.where(a[:, :3] <= 0.04045, a[:, :3] / 12.92, ((a[:, :3] + 0.055) / 1.055) ** 2.4)
     else:
         rgb = a[:, :3]
-    return float((rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)).mean())
+    lum = rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    # a mesher's atlas is mostly black padding: the mean over the whole image read 0.04 for a mid-grey receiver and
+    # the brightness correction pushed its texels to white (2026-09-28). Only texels with some light count.
+    used = lum[lum > 0.004]
+    return float(used.mean()) if len(used) > 100 else float(lum.mean())
 
 
 def tint_to_plan(o, colour, mats=None, metal=False, luminance_only=False):
@@ -565,8 +571,9 @@ for p in args["parts"]:
         rest = {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree} - in_zone
         pm = p.get("material") or {}
         # a multi-coloured body (grey with an olive panel) keeps the vendor's colours; its surface is still the plan's
-        rec["tinted"] = tint_to_plan(o, pm.get("color"), rest, metal=bool(pm.get("metal")),
-                                     luminance_only=bool(pm.get("keep_texture")))
+        # the sampled colour with the texture's own light and dark: the brightness-only path left a receiver near-white
+        # twice (2026-09-28); zones carry any second colour, so nothing is lost by tinting the rest
+        rec["tinted"] = tint_to_plan(o, pm.get("color"), rest, metal=bool(pm.get("metal")))
         rec["surface_planned"] = surface_to_plan(o, pm, rest)
         if args.get("surface_detail", True):
             rec["surface_detail"] = surface_detail(o, pm, mats=rest, vendor=True)
@@ -800,7 +807,14 @@ def align_to_body(parts, specs):
     vend = [(o, r) for o, r in parts if r["kind"] == "vendor" and (o, r) not in line]
     if not vend or not line:
         return []
-    body = max(vend, key=lambda t: (t[1]["box_max"][0] - t[1]["box_min"][0]))[0]
+    # the part the barrel enters (its rear end inside that part's box: the handguard), not the largest part (the
+    # receiver: its "bore" put the barrel 3 mm off the handguard's, 2026-09-28)
+    lead0 = min(line, key=lambda t: blib.dims(t[0])[0].x)[0]
+    l0, h0 = blib.dims(lead0)
+    rear = Vector((l0.x + 0.02 * (h0.x - l0.x), (l0.y + h0.y) / 2, (l0.z + h0.z) / 2))
+    entered = [(o, r) for o, r in vend if all(r["box_min"][i] - 0.005 <= rear[i] <= r["box_max"][i] + 0.005 for i in range(3))]
+    body = (min(entered, key=lambda t: (t[1]["box_max"][0] - t[1]["box_min"][0])) if entered
+            else max(vend, key=lambda t: (t[1]["box_max"][0] - t[1]["box_min"][0])))[0]
     co = np.empty(len(body.data.vertices) * 3, np.float32)
     body.data.vertices.foreach_get("co", co)
     co = co.reshape(-1, 3)
