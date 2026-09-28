@@ -211,7 +211,7 @@ def planned_linear(h, metal=False):
     return tuple(out)
 
 
-METAL_MIN_REFLECTANCE = 0.20
+METAL_MIN_REFLECTANCE = 0.12       # blued or black steel: clearly metal, still dark (0.20 read as chrome)
 
 
 def image_mean_luminance(img):

@@ -9,6 +9,7 @@ import os
 import sys
 
 import bpy
+from mathutils import Matrix
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blib  # noqa: E402
@@ -33,9 +34,18 @@ bpy.context.collection.objects.link(cam)
 scn = bpy.context.scene
 os.makedirs(args["out_dir"], exist_ok=True)
 out = {}
+# each view also gets a soft light from its own direction: lit from one side, the right and bottom views came out
+# nearly black and the review could not judge them (2026-09-28)
+head = bpy.data.objects.new("ViewLight", bpy.data.lights.new("ViewLight", "SUN"))
+head.data.energy = 1.6
+head.data.angle = 0.9
+bpy.context.collection.objects.link(head)
 for view in VIEWS:
     blib.ortho_camera(cam, view, lo, hi, margin=1.08)
     scn.camera = cam
+    # about 20 degrees off the camera's axis: straight along it, flat metal (a rail, a muzzle face) mirrored it back
+    # as a white blow-out
+    head.matrix_world = cam.matrix_world @ Matrix.Rotation(0.35, 4, "X") @ Matrix.Rotation(0.2, 4, "Y")
     path = os.path.join(args["out_dir"], "view_%s.png" % view)
     scn.render.filepath = path
     bpy.ops.render.render(write_still=True)
