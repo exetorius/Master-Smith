@@ -230,7 +230,7 @@ def image_mean_luminance(img):
     return float((rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)).mean())
 
 
-def tint_to_plan(o, colour, mats=None, metal=False):
+def tint_to_plan(o, colour, mats=None, metal=False, luminance_only=False):
     """A vendor part takes its planned colour, keeping its own light and dark variation: base colour = planned colour x
     (texel luminance / the texture's mean luminance), clamped. Tripo keeps a washed-out grey where the plan says matte
     black (the pistol frame, 2026-09-27); this is the part's material being set as planned while it is assembled, the
@@ -265,7 +265,25 @@ def tint_to_plan(o, colour, mats=None, metal=False):
         if not mean or mean <= 1e-4:
             continue
         want = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
-        if 0.5 <= mean / max(want, 1e-4) <= 2.0:
+        if luminance_only:
+            # a kept texture (its own colours are right, e.g. an olive panel on a grey body) is only brought to the
+            # picture's brightness: a part drawn alone on white came out near-white (2026-09-28)
+            k = max(0.25, min(4.0, want / max(mean, 1e-4)))
+            if 0.85 <= k <= 1.18:
+                t.nodes.remove(rgb)
+                continue
+            scale = t.nodes.new("ShaderNodeVectorMath")
+            scale.operation = "SCALE"
+            K_ = t.links
+            K_.new(src, scale.inputs[0])
+            scale.inputs["Scale"].default_value = k
+            for l in list(base.links):
+                t.links.remove(l)
+            K_.new(scale.outputs["Vector"], base)
+            t.nodes.remove(rgb)
+            done = True
+            continue
+        if 0.7 <= mean / max(want, 1e-4) <= 1.4:
             # the vendor's texture is already about the planned tone: keep it, with its own colour separation (the
             # TRELLIS pistol's black slide against its frame, its stippled grip) - the tint is for washed-out seeds
             # like Tripo's grey frame
@@ -547,8 +565,8 @@ for p in args["parts"]:
         rest = {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree} - in_zone
         pm = p.get("material") or {}
         # a multi-coloured body (grey with an olive panel) keeps the vendor's colours; its surface is still the plan's
-        if not pm.get("keep_texture"):
-            rec["tinted"] = tint_to_plan(o, pm.get("color"), rest, metal=bool(pm.get("metal")))
+        rec["tinted"] = tint_to_plan(o, pm.get("color"), rest, metal=bool(pm.get("metal")),
+                                     luminance_only=bool(pm.get("keep_texture")))
         rec["surface_planned"] = surface_to_plan(o, pm, rest)
         if args.get("surface_detail", True):
             rec["surface_detail"] = surface_detail(o, pm, mats=rest, vendor=True)

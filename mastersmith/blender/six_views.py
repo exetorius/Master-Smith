@@ -37,7 +37,7 @@ out = {}
 # each view also gets a soft light from its own direction: lit from one side, the right and bottom views came out
 # nearly black and the review could not judge them (2026-09-28)
 head = bpy.data.objects.new("ViewLight", bpy.data.lights.new("ViewLight", "SUN"))
-head.data.energy = 1.6
+head.data.energy = 0.6
 head.data.angle = 0.9
 bpy.context.collection.objects.link(head)
 for view in VIEWS:

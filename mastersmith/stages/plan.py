@@ -183,6 +183,46 @@ def clean_name(name, taken):
     return out
 
 
+def sample_colours(plan, threshold=0.1):
+    """Every part's (and zone's) colour read off the approved side picture inside its own box - the median of the
+    object's pixels there - instead of the planner's guess: the planner called a medium-grey stock and magazine light
+    grey and they came out near-white (2026-09-28). Glass keeps the planned colour. -> [(name, planned, sampled)]"""
+    import numpy as np
+    a = np.asarray(Image.open(plan["side"]).convert("RGB")).astype(np.float32) / 255.0
+    h, w = a.shape[:2]
+    k = max(2, min(h, w) // 40)
+    back = np.median(np.concatenate([a[:k, :k].reshape(-1, 3), a[:k, -k:].reshape(-1, 3), a[-k:, :k].reshape(-1, 3),
+                                     a[-k:, -k:].reshape(-1, 3)]), axis=0)
+    fg = np.abs(a - back).max(axis=2) > threshold
+    changed = []
+
+    def sample(box, mat, name):
+        if mat.get("glass") or mat.get("finish") == "glass":
+            return
+        x0, x1, zt, zb = box
+        if (x1 - x0) * (zb - zt) < 150:
+            return                     # a small part's box is mostly its neighbours (the trigger read the pale guard)
+        c0, c1 = int(x0 / 100 * w), max(int(x0 / 100 * w) + 1, int(x1 / 100 * w))
+        r0, r1 = int(zt / 100 * h), max(int(zt / 100 * h) + 1, int(zb / 100 * h))
+        # the inner 60% of the box: the part's own surface, not its neighbours at the edges
+        cx, cy = (c1 - c0) // 5, (r1 - r0) // 5
+        crop, m = a[r0 + cy:r1 - cy, c0 + cx:c1 - cx], fg[r0 + cy:r1 - cy, c0 + cx:c1 - cx]
+        px = crop[m]
+        if len(px) < 40:
+            return
+        med = np.median(px, axis=0)
+        hexc = "#%02x%02x%02x" % tuple(int(round(v * 255)) for v in med)
+        changed.append((name, mat.get("color"), hexc))
+        mat["color_planned"] = mat.get("color")
+        mat["color"] = hexc
+
+    for p in plan["parts"]:
+        sample(p["side_box"], p["material"], p["name"])
+        for z in p.get("zones") or []:
+            sample(z["side_box"], z["material"], "%s/%s" % (p["name"], z["name"]))
+    return changed
+
+
 def snap_to_silhouette(plan, threshold=0.1):
     """Thin code parts that stick out of everything else (a barrel, a muzzle device) get their height from the side
     picture's silhouette instead of the planner's eyeballed percentages: read off a 5% grid, the bullpup's barrel was
@@ -389,6 +429,9 @@ def make_plan(job, spec, side_src, front_src, mirror_side=False):
     plan.update({"side": side, "front": front, "side_grid": side_g, "front_grid": front_g})
     for name, before, after in snap_to_silhouette(plan):
         job.log("  %s: box snapped to the picture, height %.1f%% -> %.1f%%" % (name, before, after))
+    sampled = sample_colours(plan)
+    if sampled:
+        job.log("  colours read off the picture: %s" % ", ".join("%s %s" % (n, c) for n, _p, c in sampled))
     with open(os.path.join(work, "plan.json"), "w") as f:
         json.dump(plan, f, indent=1)
     job.log("  plan: %d parts (%d code, %d vendor), %.3f x %.3f x %.3f m%s" % (
