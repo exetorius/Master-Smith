@@ -554,3 +554,13 @@ def test_six_view_gate_needs_every_view_ok():
     assert j["verdict"] == "rebuild" and j["score"] == 5 and "front view: barrel off the centreline" in j["issues"][-1]
     assert six_view_gate({"score": 8, "verdict": "ship", "views": {**ok, "bottom": "minor: soft grip"}})["verdict"] == "ship with notes"
     assert six_view_gate({"score": 8, "verdict": "ship", "views": {"left": "ok"}})["verdict"] == "rebuild"
+
+
+def test_merged_review_keeps_agreed_defects_and_softens_lone_ones():
+    from mastersmith.stages.review import merge_reviews
+    ok = {v: "ok" for v in ("left", "right", "front", "back", "top", "bottom")}
+    a = {"score": 5, "verdict": "rebuild", "issues": ["x"], "views": {**ok, "front": "defect: knob on both sides", "top": "defect: barrel angled"}}
+    b = {"score": 7, "verdict": "ship with notes", "issues": ["y"], "views": {**ok, "front": "minor: busy front", "top": "ok"}}
+    m = merge_reviews(a, b)
+    assert m["views"]["front"].startswith("defect") and m["views"]["top"].startswith("minor")
+    assert m["score"] == 5 and m["verdict"] == "rebuild"

@@ -547,7 +547,8 @@ def _three_quarter(job, spec, part, plan, side_picture, erased, out_dir):
             and not ((q["side_box"][1] - q["side_box"][0]) < 5 and (q["side_box"][3] - q["side_box"][2]) < 5)]
     leave = ["%s (%s)" % (q["name"], q["what"].split(",")[0].split(";")[0][:80]) for q in code]
     missing = (" Leave OUT these parts, they are made separately - draw the object without them, with a clean surface "
-               "where they attach: %s." % "; ".join(leave)) if leave else ""
+               "where they attach: %s. Keep EVERYTHING else exactly as in picture 1, including anything mounted on those "
+               "parts (sights on a rail stay, standing where they stand)." % "; ".join(leave)) if leave else ""
     if erased:
         missing += " The front end stops where picture 1 stops."
     if plan.get("front"):

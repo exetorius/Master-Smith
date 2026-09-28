@@ -107,11 +107,20 @@ def merge_reviews(a, b):
         out[k] = bool(a.get(k)) and bool(b.get(k))
     va = a.get("views") if isinstance(a.get("views"), dict) else {}
     vb = b.get("views") if isinstance(b.get("views"), dict) else {}
-    worst = {}
+    def level(m):
+        m = str(m or "").lower()
+        return 2 if m.startswith("defect") else 1 if m.startswith("minor") else 0 if m else -1
+    merged = {}
     for v in set(va) | set(vb):
-        marks = [str(m) for m in (va.get(v), vb.get(v)) if m]
-        worst[v] = max(marks, key=lambda m: 2 if m.lower().startswith("defect") else 1 if m.lower().startswith("minor") else 0) if marks else ""
-    out["views"] = worst
+        la, lb = level(va.get(v)), level(vb.get(v))
+        hi_mark = va.get(v) if la >= lb else vb.get(v)
+        if max(la, lb) == 2 and min(la, lb) == 0:
+            # one pass saw a defect, the other saw nothing wrong in that view: a note, not a failure (a single pass
+            # imagined the bullpup's straight barrel "angled off the centreline", 2026-09-27)
+            merged[v] = "minor: " + str(hi_mark)[7:].strip()
+        else:
+            merged[v] = str(hi_mark or "")           # both saw a problem there (or both ok): the worse mark stands
+    out["views"] = merged
     out["passes"] = 2
     return out
 
