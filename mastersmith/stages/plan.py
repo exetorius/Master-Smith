@@ -49,7 +49,9 @@ For each part choose how it is built. The vendor models almost everything; code 
   wheels a "metal" one); four tyres drawn alone came back as one black blob under the truck (2026-09-28).
 A typical weapon: one vendor body plus a barrel, a muzzle device and a rail or two in code. A typical vehicle: one
 vendor body (with its wheels) plus code exhaust tips, mirrors, tow hooks, antennas and light lenses; the windows and
-windshield are "glass" zones of the body.
+windshield are "glass" zones of the body. An aircraft or helicopter: one vendor body plus code guns, gun barrels,
+antennas, pitot tubes and boxy pods with repeated ports (rocket pods, grilles); its canopy and windows are ALWAYS a
+"glass" zone of the body (the Havoc's canopy came out as painted hull, 2026-09-28).
 
 Answer JSON only:
 {{"parts": [{{"name": "PascalCase unique", "what": "one sentence: shape, features to model, colour and finish",

@@ -568,6 +568,10 @@ def _three_quarter(job, spec, part, plan, side_picture, erased, out_dir):
         j = extract_json(job.llm.vision(QUARTER_CHECK.format(what=part["what"]), [side_picture, path])) or {}
         if j.get("ok") and int(j.get("score", 0) or 0) >= 6:
             job.log("  part %s: seeded from a three-quarter picture (check %s/10)" % (part["name"], j.get("score")))
+            if int(j.get("score", 0) or 0) >= 8:
+                # a picture this faithful to the approved design carries the design's own colours: the mesher's texture
+                # of it beats the planner's hex guess (the Havoc's blue-grey hull came out light grey, 2026-09-28)
+                part.setdefault("material", {})["keep_texture"] = True
             return path
         fixes = str(j.get("fixes") or "")
     job.log("  part %s: the three-quarter pictures drifted from the design; seeding from the side" % part["name"])
