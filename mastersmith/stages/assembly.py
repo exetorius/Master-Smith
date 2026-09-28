@@ -509,7 +509,8 @@ def build_vendor_part(job, spec, part, plan):
     if registered:
         job.log("  part %s: seeded by %s, registered to its side picture (IoU %.2f, runner-up %.2f)" % (
             name, model.split("/")[0], registered["iou"], registered["runner_up_iou"]))
-        return {"blend": registered["blend"], "yaw": 0, "picture": picture, "seed": glb, "registration": registered}
+        return {"blend": registered["blend"], "yaw": 0, "picture": picture, "seed": glb, "registration": registered,
+                "keep_depth": bool(yaw_sweep)}
     oriented = orient_part(job, spec, {"name": name, "phrase": part["what"], "size_m": max(_size(part))}, glb)
     if not oriented:
         return None
@@ -520,8 +521,9 @@ def build_vendor_part(job, spec, part, plan):
 THREE_QUARTER_PROMPT = """Picture 1 is a side view of an object. Draw EXACTLY the same object - identical design, shape,
 proportions, colours, materials and every detail - seen from a three-quarter view: the camera about 35 degrees round
 from that side towards the object's front end and about 20 degrees above it, so its side, its front end and its top
-all show. The whole object in frame, isolated on a plain pure white background, even studio light, sharp product
-photograph, no shadows on the ground.%s"""
+all show. Shot with a long telephoto lens from far away: almost no perspective, the near and far ends drawn at the
+same scale, straight lines stay straight. The whole object in frame, isolated on a plain pure white background, even
+studio light, sharp product photograph, no shadows on the ground.%s"""
 
 
 def _three_quarter(job, spec, part, plan, side_picture, erased, out_dir):
@@ -658,7 +660,7 @@ def _assemble(job, spec, plan, built, round_no, reference):
         if b.get("code"):
             entry.update({"blend": b["blend"]} if b.get("blend") and os.path.exists(b["blend"]) else {"glb": b["glb"]})
         else:
-            entry.update({"blend": b["blend"], "yaw": b.get("yaw", 0)})
+            entry.update({"blend": b["blend"], "yaw": b.get("yaw", 0), "keep_depth": bool(b.get("keep_depth"))})
         parts.append(entry)
     out = os.path.join(job.dir, "delivery") if round_no == "final" else os.path.join(job.work_dir, "assembly_%s" % round_no)
     _blender(job, "assemble.py", {"name": spec.name, "out_dir": out, "tri_budget": spec.tri_budget, "engine": spec.engine,

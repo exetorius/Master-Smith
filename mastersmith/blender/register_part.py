@@ -143,22 +143,54 @@ if args.get("yaw_sweep"):
     def rz(deg):
         a = np.radians(deg)
         return np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
-    coarse = score_all([rz(d) for d in range(0, 360, 5)])
-    b = coarse[0]
-    deg0 = next(d for d in range(0, 360, 5) if np.allclose(rz(d), b[3]))
-    fine = score_all([rz(deg0 + d) for d in range(-4, 5)])
-    scores = sorted(fine + coarse[1:], key=lambda s: -s[0])
-    mode = "yaw_sweep"
+    # A long object's side silhouette barely changes when it is turned a few degrees (and the fit stretches it back to
+    # its box), so the silhouette alone left the bullpup body turned off the barrel's line - a mess from the front
+    # (2026-09-27). Its long axis decides the turn: the turn that makes it thinnest from the front; the side
+    # silhouette then only picks which end is forward. Objects that are not long fall back to the silhouette sweep.
+    def extents(t):
+        v = verts @ rz(t).T
+        return np.ptp(v[:, 1]), np.ptp(v[:, 0])          # width seen from the front, length seen from the side
+    t0 = min(range(0, 180), key=lambda t: extents(t)[0])
+    t0 = min((t0 + e * 0.1 for e in range(-10, 11)), key=lambda t: extents(t)[0])
+    width, length = extents(t0)
+    if length > 1.8 * width:
+        scores = score_all([rz(t0), rz(t0 + 180)])      # aligned; the silhouette picks the forward end
+        mode = "long_axis"
+    else:
+        coarse = score_all([rz(d) for d in range(0, 360, 5)])
+        b = coarse[0]
+        deg0 = next(d for d in range(0, 360, 5) if np.allclose(rz(d), b[3]))
+        fine = score_all([rz(deg0 + d) for d in range(-4, 5)])
+        scores = sorted(fine + coarse[1:], key=lambda s: -s[0])
+        mode = "yaw_sweep"
 best = scores[0]
 bpy.data.objects.remove(probe, do_unlink=True)
 R = Matrix([list(r) + [0] for r in best[3]] + [[0, 0, 0, 1]])
 ob.data.transform(R)
+shear = 0.0
+if mode == "long_axis":
+    # a seed made from a three-quarter picture comes out slanted: the picture's perspective (the near end drawn bigger)
+    # reads as depth, and the bullpup body's centreline drifted 43% of its width from butt to muzzle, the sights and
+    # the grip off the barrel's line (2026-09-27). The drift is a straight line along the length: sheared out.
+    co = np.empty(len(ob.data.vertices) * 3, np.float32)
+    ob.data.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    edges = np.linspace(co[:, 0].min(), co[:, 0].max(), 21)
+    xs, mids = [], []
+    for a, b in zip(edges, edges[1:]):
+        sl = (co[:, 0] >= a) & (co[:, 0] <= b)
+        if sl.sum() > 20:
+            xs.append((a + b) / 2)
+            mids.append((co[sl, 1].min() + co[sl, 1].max()) / 2)
+    if len(xs) >= 5:
+        shear = float(np.polyfit(xs, mids, 1)[0])
+        ob.data.transform(Matrix(((1, 0, 0, 0), (-shear, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))))
 lo, hi = blib.dims(ob)
 ob.data.transform(Matrix.Translation(-(lo + hi) * 0.5))
 ob.name = "Part"
 bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath(args["out_blend"]), compress=True)
 result = {"mode": mode, "iou": round(float(best[1]), 3), "score": round(float(best[0]), 3), "aspect": round(float(best[2]), 3),
-          "target_aspect": round(float(t_aspect), 3), "runner_up_iou": round(float(scores[1][1]), 3),
-          "rotation": [[round(float(v), 4) if mode == "yaw_sweep" else int(v) for v in row] for row in best[3]]}
+          "target_aspect": round(float(t_aspect), 3), "runner_up_iou": round(float(scores[1][1]), 3), "shear": round(shear, 4),
+          "rotation": [[round(float(v), 4) if mode in ("yaw_sweep", "long_axis") else int(v) for v in row] for row in best[3]]}
 json.dump(result, open(args["out_json"], "w"), indent=1)
 print("[register] best IoU %.3f (aspect %.2f vs %.2f), runner-up %.3f" % (best[1], best[2], t_aspect, scores[1][1]), flush=True)

@@ -81,6 +81,11 @@ def fit(o, p):
     # (2026-09-27). A part more than 1.8x out of proportion with its box is kept in proportion on that axis instead.
     s = sorted(ratios)[1]
     scale = [r if r / s <= 1.8 and s / r <= 1.8 else s for r in ratios]
+    if p.get("keep_depth"):
+        # seeded from a three-quarter picture, the vendor saw the part's real depth: its width keeps the length and
+        # height scale instead of being stretched to the planned front span, which counts every protrusion (the
+        # bullpup body was squeezed to 76% of its width and was a mess from the front, 2026-09-27)
+        scale[1] = math.sqrt(scale[0] * scale[2])
     o.data.transform(Matrix.Translation(-(lo + hi) * 0.5))
     o.data.transform(Matrix.Diagonal(Vector(scale).to_4d()))
     o.data.transform(Matrix.Translation(centre))
