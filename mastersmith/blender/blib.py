@@ -83,9 +83,16 @@ def setup_render(size, samples, look="probe"):
         flat_bg = nt.nodes.new("ShaderNodeBackground")
         env = nt.nodes.new("ShaderNodeTexEnvironment")
         env.image = bpy.data.images.load(hdri, check_existing=True)
-        env_bg.inputs[1].default_value = 1.2
+        # calibrated 2026-09-28: at 1.2 (with the key and rim at 50/40) a mid grey of sRGB 96 in the reference rendered
+        # at 151-165, and every review called the models pale; 0.45 puts it near the reference
+        env_bg.inputs[1].default_value = 0.45
         flat_bg.inputs[0].default_value = backdrop
-        nt.links.new(env.outputs[0], env_bg.inputs[0])
+        warm = nt.nodes.new("ShaderNodeMixRGB")          # the studio HDRI is cool: a mid grey rendered 86/96/97
+        warm.blend_type = "MULTIPLY"
+        warm.inputs[0].default_value = 1.0
+        warm.inputs[2].default_value = (1.12, 1.0, 0.94, 1.0)
+        nt.links.new(env.outputs[0], warm.inputs[1])
+        nt.links.new(warm.outputs[0], env_bg.inputs[0])
         nt.links.new(lp.outputs["Is Camera Ray"], mix.inputs[0])
         nt.links.new(env_bg.outputs[0], mix.inputs[1])
         nt.links.new(flat_bg.outputs[0], mix.inputs[2])
@@ -128,8 +135,8 @@ class Stage:
             self.temps.append(o)
         if look == "preview":
             # the studio HDRI does the lighting; a small key shapes the shadows, a rim separates the silhouette
-            light("Key", (0.7, -0.8, 0.8), 50, 1.6, (1.0, 0.98, 0.96))
-            light("Rim", (-0.6, -0.5, 0.9), 40, 3.0)
+            light("Key", (0.7, -0.8, 0.8), 20, 1.6, (1.0, 0.98, 0.96))
+            light("Rim", (-0.6, -0.5, 0.9), 16, 3.0)
         else:
             light("Key", (0.7, -0.8, 0.8), 200, 4.0, (1.0, 0.98, 0.96))
             light("Fill", (-0.7, 0.6, 0.25), 70, 5.0, (0.96, 0.97, 1.0))

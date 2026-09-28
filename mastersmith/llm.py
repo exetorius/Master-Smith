@@ -1,4 +1,5 @@
-"""OpenRouter chat completions with tool calling and per-call cost capture (usage.cost)."""
+"""OpenRouter chat completions with tool calling and per-call cost capture (usage.cost); or, with MASTERSMITH_LLM set,
+the same calls answered by Claude Code or Codex on this PC (llm_cli.py)."""
 import base64
 import json
 import time
@@ -19,20 +20,34 @@ class LLMError(Exception):
 class LLM:
     def __init__(self, key=None, log=print):
         self.key = key or os.environ.get("OPENROUTER_API_KEY", "")
-        if not self.key:
-            raise LLMError("OPENROUTER_API_KEY is not set (put it in .env)")
+        if config.LLM_BACKEND == "openrouter":
+            if config.NO_SPEND:
+                raise LLMError("MASTERSMITH_NO_SPEND=1 refuses OpenRouter: set MASTERSMITH_LLM=claude-code or codex")
+            if not self.key:
+                raise LLMError("OPENROUTER_API_KEY is not set (put it in .env)")
+        elif config.LLM_BACKEND not in ("claude-code", "codex"):
+            raise LLMError("MASTERSMITH_LLM must be openrouter, claude-code or codex, not %r" % config.LLM_BACKEND)
         self.log = log
         self.calls = []
         self.stage = ""                  # the pipeline names the stage; every call carries it for the cost breakdown
 
-    def chat(self, messages, model=None, tools=None, max_tokens=1200, temperature=0.3, json_only=False):
+    def chat(self, messages, model=None, tools=None, max_tokens=1200, temperature=0.3, json_only=False, effort="low"):
         """Returns the assistant message dict (content, tool_calls) and records its cost.
 
         Reasoning models spend their thinking INSIDE max_tokens: Gemini 3.8 Flash used 477 of a 500-token
         budget on reasoning and cut the JSON answer off mid-word (2026-09-16). Effort is pinned low - the
         director fills a form and the checker answers yes/no questions - and JSON answers are requested as such."""
+        if config.LLM_BACKEND != "openrouter":
+            from . import llm_cli
+            try:
+                msg, rec = llm_cli.chat(messages, model or config.DIRECTOR_MODEL, tools=tools, json_only=json_only,
+                                        effort=effort, log=self.log)
+            except llm_cli.CLIError as exc:
+                raise LLMError(str(exc))
+            self.calls.append({**rec, "stage": self.stage})
+            return msg
         body = {"model": model or config.DIRECTOR_MODEL, "messages": messages, "max_tokens": max_tokens,
-                "temperature": temperature, "usage": {"include": True}, "reasoning": {"effort": "low"}}
+                "temperature": temperature, "usage": {"include": True}, "reasoning": {"effort": effort}}
         if json_only:
             body["response_format"] = {"type": "json_object"}
         if tools:
@@ -65,7 +80,7 @@ class LLM:
         msg = data["choices"][0]["message"]
         return msg
 
-    def vision(self, prompt, image_paths, model=None, max_tokens=1500):
+    def vision(self, prompt, image_paths, model=None, max_tokens=1500, effort="low", json_only=True):
         """One question about one or more local images; returns the text."""
         parts = [{"type": "text", "text": prompt}]
         for p in image_paths:
@@ -75,7 +90,7 @@ class LLM:
                 b64 = base64.b64encode(f.read()).decode()
             parts.append({"type": "image_url", "image_url": {"url": "data:image/%s;base64,%s" % (mime, b64)}})
         msg = self.chat([{"role": "user", "content": parts}], model=model or config.VISION_MODEL,
-                        max_tokens=max_tokens, temperature=0.1, json_only=True)
+                        max_tokens=max_tokens, temperature=0.1, json_only=json_only, effort=effort)
         return msg.get("content") or ""
 
     def spent(self):

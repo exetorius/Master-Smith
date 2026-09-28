@@ -1,5 +1,6 @@
-"""Pictures: from a prompt, or from a prompt plus reference pictures (the edit case). Two providers behind one call:
-fal ids (fal-ai/nano-banana-2, ...; with references the /edit endpoint) and OpenRouter image ids (POST /api/v1/images).
+"""Pictures: from a prompt, or from a prompt plus reference pictures (the edit case). Three providers behind one call:
+fal ids (fal-ai/nano-banana-2, ...; with references the /edit endpoint), OpenRouter image ids (POST /api/v1/images)
+and local/ ids (FLUX.2 klein on this PC, free: mastersmith/local.py).
 Every successful call is appended to `calls` with its cost so the pipeline can settle the bill."""
 import base64
 import io
@@ -110,6 +111,19 @@ class Images:
             endpoint, secs, usd, (" (%d reference%s)" % (len(refs), "" if len(refs) == 1 else "s")) if refs else ""))
         return path
 
+    def _generate_local(self, prompt, path, model, refs, aspect_ratio):
+        from . import local
+        image_price(model)
+        local_refs = [self.fal().uploads.get(r, r) if self._fal else r for r in refs[:4]]
+        try:
+            secs = local.picture(prompt, path, local_refs, aspect_ratio, log=self.log)
+        except local.LocalError as exc:
+            raise ImageError("local %s: %s" % (model, exc))
+        self.calls.append({"model": model, "seconds": secs, "usd": 0.0, "references": len(refs), "stage": self.stage})
+        self.log("  image %s: %.0fs, $0%s" % (
+            model, secs, (" (%d reference%s)" % (len(refs), "" if len(refs) == 1 else "s")) if refs else ""))
+        return path
+
     def _headers(self):
         return {"Authorization": "Bearer " + self.key, "Content-Type": "application/json",
                 "HTTP-Referer": "https://github.com/kevinpbuckley/Master-Smith", "X-Title": "Master Smith"}
@@ -117,9 +131,13 @@ class Images:
     def generate(self, prompt, path, model=None, references=(), aspect_ratio="4:3", resolution=None, timeout=300):
         """One PNG at `path`. `references`: local paths or URLs the picture must follow (an edit)."""
         model = model or config.CONCEPT_MODEL
+        if config.NO_SPEND and not model.startswith("local/") and not (config.PAID_PICTURES and model.startswith("fal-ai/")):
+            model = config.LOCAL_PICTURE_MODEL           # FLUX.2 klein on this PC (OpenRouter pictures are never allowed)
         refs = [r for r in (references or []) if r]
         if model.startswith("fal-ai/"):
             return self._generate_fal(prompt, path, model, refs, aspect_ratio, resolution)
+        if model.startswith("local/"):
+            return self._generate_local(prompt, path, model, refs, aspect_ratio)
         if not self.key:
             raise ImageError("OPENROUTER_API_KEY is not set (put it in .env), needed for the picture model %s" % model)
         reserve = image_price(model)                  # refuses unpriced models before any money moves

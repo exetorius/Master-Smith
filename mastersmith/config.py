@@ -1,10 +1,10 @@
-"""Environment, paths and model routing. Keys come from <repo>/.env (FAL_KEY, OPENROUTER_API_KEY)."""
+"""Environment, paths and model routing. Keys come from <repo>/.env (FAL_KEY; OPENROUTER_API_KEY only for the
+openrouter LLM backend). Read by the ms tools (mastersmith/ms.py) and the stage modules they use."""
 import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = ROOT / "mastersmith" / "skills"
-BLENDER_SCRIPT = ROOT / "mastersmith" / "blender" / "finish.py"
 
 
 def load_env(path=None):
@@ -22,40 +22,46 @@ def load_env(path=None):
 
 load_env()
 
-# Everything the service writes lives under one directory: builds (out/), uploads and the SQLite ledger. The Docker
-# image points MASTERSMITH_DATA at a volume; locally it is the repository.
+# Jobs live under out/<Name>/ (MASTERSMITH_DATA moves that root).
 DATA_DIR = Path(os.environ.get("MASTERSMITH_DATA") or ROOT).resolve()
 OUT_DIR = DATA_DIR / "out"
-UPLOADS_DIR = DATA_DIR / "uploads"
-DB_PATH = DATA_DIR / "mastersmith.db"
 
 BLENDER_BIN = os.environ.get("BLENDER_BIN", r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe")
 # Every Blender run: headless, and never the scripts a .blend carries (-Y), whatever the user's "Auto Run Python
 # Scripts" preference says - customers hand us .blend files.
 BLENDER_FLAGS = ["-b", "-Y"]
 
-# A fixed API key for scripts and agents, straight from .env: any string you make up. Requests then carry it as a
-# bearer token or X-API-Key. With no key configured, every request is the local user: this is one person's tool.
-API_KEY = os.environ.get("MASTERSMITH_API_KEY", "").strip()
-API_USER = os.environ.get("MASTERSMITH_API_USER", "agent").strip() or "agent"
-# The key older copies of .env.example shipped: known to everyone, so the service refuses to start with it.
-PLACEHOLDER_API_KEY = "ms_dev_change_me"
-# Browser origins that may call the API directly. The chat's own requests go through its Next.js server, so this only
-# matters for a page you build yourself; any other website open in your browser is refused.
-CORS_ORIGINS = [o.strip() for o in os.environ.get(
-    "MASTERSMITH_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
-
 # --- LLMs (OpenRouter ids). The director runs the chat and decides; it is cheap on purpose.
+# Who answers the model calls (director, plan, part code, checks, review): "openrouter" (pay per call), or a coding
+# agent on this PC on the owner's own subscription: "claude-code" (`claude -p`) or "codex" (`codex exec`).
+LLM_BACKEND = os.environ.get("MASTERSMITH_LLM", "openrouter").strip().lower()
+CLAUDE_CODE_MODEL = os.environ.get("MASTERSMITH_CLAUDE_MODEL", "")          # forces one alias for every call
+CLAUDE_CODE_DEFAULT = os.environ.get("MASTERSMITH_CLAUDE_DEFAULT", "sonnet")  # for non-Claude ids (Gemini checks)
+CODEX_MODEL = os.environ.get("MASTERSMITH_CODEX_MODEL", "")                 # empty = Codex's own default
+# No spending at all: every paid fal / OpenRouter call is refused before it is made, pictures and meshes run on this
+# PC (local/ ids), the model calls need a CLI backend, and paid-only steps (rigging, texture tiles) are skipped.
+NO_SPEND = os.environ.get("MASTERSMITH_NO_SPEND", "0") == "1"
+# ...except pictures: with this on, the fal picture models (Nano Banana) still run under no-spend. They keep a design
+# far better than the local FLUX.2 klein, and a build draws few (owner, 2026-09-27: "we should use nano banana").
+PAID_PICTURES = os.environ.get("MASTERSMITH_PAID_PICTURES", "0") == "1"
+# The assembled body's seed picture: "three_quarter" (drawn by the picture model from the approved side view, the
+# mesher gets depth) or "side" (the approved side picture with the code parts erased: exact, but no depth). Empty =
+# three_quarter when the picture model is not the local one.
+BODY_SEED_VIEW = os.environ.get("MASTERSMITH_BODY_SEED_VIEW", "").strip().lower()
+# Every part of an assembly from the mesher, none modelled in Blender code (owner, 2026-09-28: "I don't want to
+# sculpt any parts with Blender, try fully sculpting with TRELLIS"). "0" brings the code parts back.
+ALL_VENDOR = os.environ.get("MASTERSMITH_ALL_VENDOR", "1") == "1"
 DIRECTOR_MODEL = os.environ.get("MASTERSMITH_DIRECTOR_MODEL", "google/gemini-3.8-flash")
 VISION_MODEL = os.environ.get("MASTERSMITH_VISION_MODEL", "google/gemini-3.8-flash")
-PREMIUM_MODEL = os.environ.get("MASTERSMITH_PREMIUM_MODEL", "anthropic/claude-sonnet-5")
-# The director models the chat offers (OpenRouter ids; every one must support tools). DIRECTOR_MODEL is the default
-# and always listed first; the UI can also show every tool-and-vision-capable model OpenRouter serves.
-DIRECTOR_MODELS = [m.strip() for m in os.environ.get(
-    "MASTERSMITH_DIRECTOR_MODELS",
-    "deepseek/deepseek-v4.1-flash,openai/gpt-6-luna,z-ai/glm-5.3-flash,openai/gpt-6-sol,meta/muse-spark-1.3-contributor,meta/muse-spark-1.3,anthropic/claude-sonnet-5,anthropic/claude-opus-5.5"
-).split(",") if m.strip()]
-
+# Assembly builds (docs/ASSEMBLY.md): the builder plans the parts, writes the code parts and checks the assembly.
+BUILDER_MODEL = os.environ.get("MASTERSMITH_BUILDER_MODEL", "anthropic/claude-opus-5.5")
+# small parts (pins, levers, sights) are written by a cheaper model: the builder calls were 97% of an assembly's cost
+BUILDER_MODEL_SMALL = os.environ.get("MASTERSMITH_BUILDER_MODEL_SMALL", "anthropic/claude-sonnet-5")
+# Assembly is opt-in until it beats one seed on the same object (owner, 2026-09-27): "1" makes it the hard-surface default
+ASSEMBLY_DEFAULT = os.environ.get("MASTERSMITH_ASSEMBLY_DEFAULT", "0") == "1"
+ASSEMBLY_MAX_PARTS = int(os.environ.get("MASTERSMITH_ASSEMBLY_MAX_PARTS", "24"))
+ASSEMBLY_WORKERS = int(os.environ.get("MASTERSMITH_ASSEMBLY_WORKERS", "4"))
+ASSEMBLY_CHECK_ROUNDS = int(os.environ.get("MASTERSMITH_ASSEMBLY_CHECK_ROUNDS", "2"))
 # --- fal endpoints by role. One vendor per role; the 2026-09-16 bake-off picked these.
 # --- pictures come from fal too (fal-ai/nano-banana-2 and friends; a fal id with reference pictures runs the /edit
 # endpoint), so one account covers pictures and meshes. OpenRouter image ids (google/gemini-3.1-flash-image, ...) still
@@ -66,43 +72,35 @@ CONCEPT_MODEL_PREMIUM = os.environ.get("MASTERSMITH_CONCEPT_PREMIUM", "fal-ai/na
 # the cheap model hallucinates extra fine parts on weapons and vehicles (issue #8). Set MASTERSMITH_CONCEPT_HARD to override.
 CONCEPT_MODEL_HARD = os.environ.get("MASTERSMITH_CONCEPT_HARD", "fal-ai/nano-banana-pro")
 IMAGE_RESOLUTION = os.environ.get("MASTERSMITH_IMAGE_RESOLUTION", "1K")
-# The hybrid repaint of the seed: "meshy" = Meshy retexture on fal ($0.30); "pictures" = the picture model repaints the
-# seed's own orthographic renders in the reference's look and Blender projects and bakes them (about $0.40 of pictures,
-# ported from the openrouter-only branch). MASTERSMITH_REPAINT overrides; Spec.repaint per build.
-REPAINT_DEFAULT = os.environ.get("MASTERSMITH_REPAINT", "meshy").strip().lower() or "meshy"
-STAMP_MARKINGS = os.environ.get("MASTERSMITH_STAMP_MARKINGS", "0") == "1"   # exact lettering stamped from a markings read of the reference
 HARD_SURFACE_CATEGORIES = ("weapon", "vehicle", "aircraft", "helicopter")
 # Alternative seed vendors for the hard-surface comparison of issue #6; MASTERSMITH_SEED_MODEL overrides the default.
 SEED_MODEL_ALTERNATIVES = {"hitem3d": "fal-ai/hitem3d/image-to-3d", "meshy7": "fal-ai/meshy/v7/image-to-3d",
                            "hitem3d3": "hitem3d/hi3d/v3.0/image-to-3d"}   # issue #6: the 2048-voxel model, on fal since 2026-09
-# Multiview alternatives: these take the SAME checked view set as Tripo multiview. Meshy v7 multi-image asks only for
-# "1 to 4 images of the same object from different angles" - no fixed [front, left, back, right] order (issue #6).
-SEED_MULTIVIEW_ALTERNATIVES = {"meshy7mv": "fal-ai/meshy/v7/multi-image-to-3d"}
 # Hi3D v3 multi-view (2026-09-25): the same 2048-voxel model fed named front / back / left / right pictures instead of one.
 # Same price as its single-image sibling; every slot is optional, so our [primary, second view, mirror] set fits it.
 SEED_HI3D_MULTIVIEW = "hitem3d/hi3d/v3.0/multi-view-to-3d"
-# Hybrid seed (2026-09-18): Meshy v7 geometry (sharper, ~$0.035) then Meshy retexture on the mesh's own UVs (~$0.30) for
-# a clean albedo instead of Meshy's speckled one. Categories listed here default to it; MASTERSMITH_HYBRID=0|1 overrides.
-_hyb_env = os.environ.get("MASTERSMITH_HYBRID", "").strip()
-HYBRID_DEFAULT = None if _hyb_env not in ("0", "1") else _hyb_env == "1"
-# Off by default (opt in with Spec.hybrid or MASTERSMITH_HYBRID=1). Local pairs favoured it on ground vehicles and the sword
-# (clean albedo, sharper edges), but production wave 22 (2026-09-18) showed the reference repaint washing colours toward
-# light silver (M4A1, Glock, a grey F-150 for a dark blue truck), painting windows white, and Meshy melting rotor hubs
-# and thin airframes. Until the repaint holds the reference colours, Tripo stays the default everywhere.
-HYBRID_CATEGORIES = ()
-# Which geometry a hybrid build seeds with: "meshy7mv" (the original hybrid) or "tripo" (Tripo's mesh, repainted). Tripo
-# geometry with the picture repaint is the production setting since 2026-09-19 (Meshy melted rotor hubs and airframes).
-HYBRID_SEED = os.environ.get("MASTERSMITH_HYBRID_SEED", "meshy7mv").strip().lower() or "meshy7mv"
 # Tripo quad topology (+$0.05, answers FBX): on the Glock photo it kept the slide text legible and scored the best edge
 # energy of four vendors (issue #6, 2026-09-17). Default for hard-surface categories; MASTERSMITH_SEED_QUAD=0/1 forces it.
 _quad_env = os.environ.get("MASTERSMITH_SEED_QUAD", "")
 SEED_QUAD = _quad_env == "1" if _quad_env in ("0", "1") else None   # None -> by category
 EDIT_MODEL = os.environ.get("MASTERSMITH_EDIT_MODEL", "fal-ai/nano-banana-2")   # photo -> clean profile / other view (its /edit endpoint)
-CUTOUT_MODEL = "fal-ai/birefnet/v2"             # background removal, $0.003
+# 4x upscale of the plan pictures, framing unchanged: a trigger is ~100 px in a 1200 px reference (assemblies)
+UPSCALE_MODEL = os.environ.get("MASTERSMITH_UPSCALE_MODEL", "fal-ai/esrgan")
 SEED_MODEL = "tripo3d/h3.1/image-to-3d"         # full PBR, thin parts survive
-RETEXTURE_MODEL = "fal-ai/meshy/v5/retexture"   # repaint an existing mesh on its own UVs, $0.30
 SEED_MULTIVIEW_MODEL = "tripo3d/h3.1/multiview-to-3d"
-SEED_ALT_MODEL = "fal-ai/hyper3d/rodin/v2"      # several references at once; refuses military subjects
+
+# --- the free tier: models on this PC (mastersmith/local.py). Pick picture_model "local/flux2-klein-4b" and seed_vendor
+# "local" for a build; the ids below route there and cost $0. The folder holds ComfyUI (FLUX.2 klein 4B) and trellis.cpp
+# (TRELLIS.2 GGUF): see its README. ComfyUI is started on first use when it is not already running.
+LOCAL_MODELS_DIR = Path(os.environ.get("MASTERSMITH_LOCAL_MODELS_DIR", r"E:\local-models"))
+LOCAL_COMFY_URL = os.environ.get("MASTERSMITH_LOCAL_COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
+LOCAL_PICTURE_MODEL = "local/flux2-klein-4b"
+LOCAL_SEED_MODEL = "local/trellis2"
+LOCAL_TRELLIS_RES = int(os.environ.get("MASTERSMITH_LOCAL_TRELLIS_RES", "1024"))       # 512 is ~2x faster and softer
+LOCAL_TRELLIS_QUANT = os.environ.get("MASTERSMITH_LOCAL_TRELLIS_QUANT", "q8")           # q8 fits 12 GB; "" = f16, "q4"
+# texture volume: "" lets trellis.cpp pick (512 at res 1024), "1024" is sharper (a stippled grip survives) and ~3x
+# slower (485 s against 146 s on the pistol, 2026-09-27); the atlas then goes to 4096
+LOCAL_TRELLIS_TEX_RES = os.environ.get("MASTERSMITH_LOCAL_TRELLIS_TEX_RES", "")
 
 # --- spend. You run this against your own fal and OpenRouter keys; the ledger only keeps score of what they spent,
 # in cents. Nothing is charged, held or refused here.

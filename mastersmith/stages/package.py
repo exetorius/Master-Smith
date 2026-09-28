@@ -30,8 +30,6 @@ def write_package(spec, report, result, delivery_dir):
     if report.get("tiles"):
         glass_note += (" A seamless tiling material set (T_{name}_Tile_BaseColor/Normal/Roughness/Metallic, plus Height) ships next to "
                        "the atlas; in the engine, layer it over the base material as surface detail on the large flat faces.")
-    if report.get("cockpit"):
-        glass_note += " A cockpit interior (slot MI_{name}_Cockpit) sits under the canopy; keep the glass translucent to see it."
     rig = result.get("rig") or {}
     if rig.get("status") == "rigged" and spec.category == "character":
         rig_note = ("- Skeletal mesh: import SK_{name}.fbx (humanoid skeleton). Import the A_{name}_* files as animations onto "
@@ -59,10 +57,12 @@ def write_package(spec, report, result, delivery_dir):
         f.write(text)
     zpath = os.path.join(delivery_dir, "%s.zip" % name)
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
-        for fn in sorted(os.listdir(delivery_dir)):
-            if fn.endswith(".zip"):
-                continue
-            z.write(os.path.join(delivery_dir, fn), fn)
+        for dp, _dn, fns in os.walk(delivery_dir):
+            for fn in sorted(fns):
+                if fn.endswith(".zip"):
+                    continue
+                full = os.path.join(dp, fn)
+                z.write(full, os.path.relpath(full, delivery_dir))
     with open(os.path.join(delivery_dir, "manifest.json"), "w") as f:
         json.dump({"name": name, "spec": spec.to_dict(), "files": sorted(os.listdir(delivery_dir)),
                    "review": result.get("review"), "gate": result.get("gate"), "rig": {k: v for k, v in rig.items() if k != "notes"}},

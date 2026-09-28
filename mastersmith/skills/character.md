@@ -7,7 +7,6 @@ origin: bottom
 default_tris: 80000
 default_size_m: 1.8
 front_hint: the face and chest
-material_families: [{"phrase": "the metal armour plates and helmet of the character", "current": "shiny metal", "metal": true, "finish": "satin", "roughness": 0.66}]
 ---
 # Characters and creatures
 

@@ -16,6 +16,7 @@ FAL_PRICES = {
     "fal-ai/meshy/v7/multi-image-to-3d": 0.05,   # MEASURED 2026-09-18 via fal's balance endpoint: $0.034 and $0.037
                                                  # on two 4-view 300k-quad PBR runs. Held at 0.05 as the reservation.
     "fal-ai/birefnet/v2": 0.003,
+    "fal-ai/esrgan": 0.02,                       # CALIBRATE: billed per compute second, a 1K picture x4 is ~1-3 s
     # pictures on fal (fal's published per-image prices, 2026-09-24; 2K/4K outputs cost more)
     "fal-ai/nano-banana-2": 0.08, "fal-ai/nano-banana-2/edit": 0.08,
     "fal-ai/nano-banana": 0.04, "fal-ai/nano-banana/edit": 0.04,
@@ -24,15 +25,13 @@ FAL_PRICES = {
     "tripo3d/h3.1/image-to-3d": 0.30,         # standard; +0.10 HD textures, +0.20 detailed geometry, +0.05 quad
     "tripo3d/h3.1/multiview-to-3d": 0.30,
     "fal-ai/hyper3d/rodin/v2": 0.40,
-    "fal-ai/meshy/v5/retexture": 1.20,           # UNVERIFIED: fal's page shows no price sentence for this endpoint; the Meshy
-                                                 # retexture line fal does publish reads "$0.8 per untextured model / $1.2 per
-                                                 # textured model" (2026-09-23), so the worst case is held at $1.20 until measured
     "fal-ai/meshy/v5/remesh": 0.20,
     "fal-ai/sam-3/image": 0.005,                 # text-prompted segmentation masks (glass, wheels)
     "fal-ai/hunyuan-3d/v3.1/part": 0.45,         # split a fused mesh (FBX, <=30k faces) into parts
     "fal-ai/meshy/rigging": 0.20,                # humanoid auto-rig from a GLB; +0.12 with enable_animation
     "fal-ai/meshy/rigging/multi-animation": 0.56,
     "tripo3d/tripo/segment": 0.20,               # semantic part split of a GLB (CALIBRATE against the fal dashboard)
+    "local/trellis2": 0.0,                       # TRELLIS.2 on this PC (mastersmith/local.py): free, 1.5-6.5 min a seed
 }
 
 
@@ -53,8 +52,8 @@ IMAGE_PRICES = {
     "openai/gpt-5.4-image-2": 0.10,
     "openai/gpt-5-image": 0.12,
     "openai/gpt-5-image-mini": 0.03,
+    "local/flux2-klein-4b": 0.0,                 # FLUX.2 klein 4B on this PC (mastersmith/local.py): free, ~11 s a picture
 }
-REPAINT_PICTURES = 5          # front / left / back / right / top renders repainted by the picture model
 
 
 class Unpriced(Exception):
@@ -74,6 +73,7 @@ PICTURE_NAMES = {           # what the providers call them; the ids are what the
     "google/gemini-3.1-flash-lite-image": "Nano Banana 2 Lite", "google/gemini-2.5-flash-image": "Nano Banana",
     "google/gemini-3-pro-image": "Nano Banana Pro", "google/gemini-3-pro-image-preview": "Nano Banana Pro (preview)",
     "openai/gpt-5.4-image-2": "GPT-5.4 Image 2", "openai/gpt-5-image": "GPT-5 Image", "openai/gpt-5-image-mini": "GPT-5 Image Mini",
+    "local/flux2-klein-4b": "FLUX.2 klein 4B (free)",
 }
 
 
@@ -83,7 +83,7 @@ def picture_catalogue():
     for mid, usd in IMAGE_PRICES.items():
         if mid.endswith("-preview") or mid.endswith("/edit"):
             continue                                   # preview ids alias the released ones; /edit is derived from the base id
-        provider = "fal.ai" if mid.startswith("fal-ai/") else "OpenRouter"
+        provider = "fal.ai" if mid.startswith("fal-ai/") else "this PC" if mid.startswith("local/") else "OpenRouter"
         out.append({"id": mid, "label": "%s · %s (%s) · $%.2f a picture" % (PICTURE_NAMES.get(mid, mid), provider, mid, usd),
                     "name": PICTURE_NAMES.get(mid, mid), "provider": provider, "usd": usd, "default": mid == config.CONCEPT_MODEL})
     return sorted(out, key=lambda r: (not r["default"], r["provider"] != "fal.ai", r["usd"]))
@@ -92,10 +92,16 @@ def picture_catalogue():
 def edit_model(spec=None):
     """The picture model for edits and extra views: the build's choice, else the configured editor."""
     chosen = getattr(spec, "picture_model", None) if spec is not None else None
+    if config.NO_SPEND:
+        if not config.PAID_PICTURES:
+            return config.LOCAL_PICTURE_MODEL
+        return chosen if chosen in IMAGE_PRICES and not chosen.startswith(("google/", "openai/")) else config.EDIT_MODEL
     return chosen if chosen in IMAGE_PRICES else config.EDIT_MODEL
 
 
 def concept_model(spec):
+    if config.NO_SPEND and not config.PAID_PICTURES:
+        return config.LOCAL_PICTURE_MODEL
     chosen = getattr(spec, "picture_model", None)
     if chosen in IMAGE_PRICES:
         return chosen                                   # the customer's pick wins over the category rules
@@ -103,11 +109,6 @@ def concept_model(spec):
     if spec.category in config.HARD_SURFACE_CATEGORIES and config.CONCEPT_MODEL_HARD:
         model = config.CONCEPT_MODEL_HARD
     return model
-
-
-def repaint_mode(spec):
-    m = (getattr(spec, "repaint", None) or config.REPAINT_DEFAULT or "meshy").lower()
-    return m if m in ("meshy", "pictures") else "meshy"
 
 
 def price(model, payload=None):
@@ -126,7 +127,8 @@ def price(model, payload=None):
 
 
 # A generous per-call allowance for the director/vision LLM; settled to the real usage.cost after.
-LLM_CALL_ALLOWANCE_USD = 0.03
+FREE_LLM = config.LLM_BACKEND != "openrouter"   # Claude Code / Codex on the owner's subscription: $0 a call
+LLM_CALL_ALLOWANCE_USD = 0.0 if FREE_LLM else 0.03
 
 
 # The mesh vendors a build can pick (Spec.seed_vendor; empty = the default). Shown in the chat's model selector.
@@ -143,12 +145,16 @@ SEED_VENDORS = [
      "note": "crispest geometry, the best high-poly source for baking, one picture, dear"},
     {"key": "hitem3d3mv", "label": "Hitem3D v3 multi-view (2048)", "model": config.SEED_HI3D_MULTIVIEW, "multiview": True,
      "note": "the same crisp geometry seeded from every approved angle (front, sides, back), same price"},
+    {"key": "local", "label": "TRELLIS.2 (this PC, free)", "model": config.LOCAL_SEED_MODEL, "multiview": False,
+     "note": "free: runs on this PC's GPU from one picture, 1.5-6.5 min; faithful silhouette, softer surfaces than Tripo"},
 ]
 
 
 def seed_vendor(spec):
     """The catalogue row a spec's seed will come from."""
     key = (getattr(spec, "seed_vendor", None) or os.environ.get("MASTERSMITH_SEED_MODEL", "") or "tripo").strip().lower()
+    if config.NO_SPEND:
+        key = "local"                                   # TRELLIS.2 on this PC
     return next((v for v in SEED_VENDORS if v["key"] == key), SEED_VENDORS[0])
 
 
@@ -163,8 +169,48 @@ def vendor_catalogue():
     return out
 
 
+# Assembly builds: what the builder model's calls and the vendor parts cost at most. Settled to actual usage.cost.
+BUILDER_CALL_USD = 0.0 if FREE_LLM else 0.30         # one builder call with pictures (plan, big part code, checks)
+BUILDER_SMALL_CALL_USD = 0.0 if FREE_LLM else 0.08   # one call of the cheaper builder for a small part
+ASSEMBLY_CODE_PARTS = 10            # the worst case reserves this many code parts at 2.5 builder calls each
+ASSEMBLY_BIG_PARTS = 3              # of which this many are big enough for the main builder
+ASSEMBLY_VENDOR_PARTS = 12 if config.NO_SPEND else 3     # free on this PC: a modeller's split, many small parts
+
+
+def estimate_assembly(spec):
+    """Worst case of the parts path after the pictures: plan, code parts, vendor parts, assembly and its checks."""
+    vendor = seed_vendor(spec)
+    part_seed = FAL_PRICES["hitem3d/hi3d/v3.0/image-to-3d"] if vendor["key"].startswith("hitem3d3") else \
+        price(config.LOCAL_SEED_MODEL) if vendor["key"] == "local" else \
+        price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"})
+    return [
+        ("parts plan from the approved pictures (builder)", 2 * BUILDER_CALL_USD),
+        ("plan pictures sharpened 4x for the part builder (ESRGAN)", 0.0 if config.NO_SPEND else 2 * FAL_PRICES.get(config.UPSCALE_MODEL, 0.02)),
+        ("code parts: modelled, built and self-checked (builder, up to %d parts)" % ASSEMBLY_CODE_PARTS,
+         2.5 * (ASSEMBLY_BIG_PARTS * BUILDER_CALL_USD + (ASSEMBLY_CODE_PARTS - ASSEMBLY_BIG_PARTS) * BUILDER_SMALL_CALL_USD)),
+        ("vendor parts: drawn alone and seeded (up to %d, %s)" % (ASSEMBLY_VENDOR_PARTS, vendor["label"] if vendor["key"].startswith("hitem3d3") or vendor["key"] == "local" else "Tripo H3.1"),
+         ASSEMBLY_VENDOR_PARTS * (image_price(edit_model(spec)) + 2 * LLM_CALL_ALLOWANCE_USD + part_seed)),
+        ("assembly checks against the pictures (builder)", config.ASSEMBLY_CHECK_ROUNDS * BUILDER_CALL_USD),
+        ("Blender assembly: place, bake one atlas, LODs, collision, FBX/GLB", 0.0),
+    ]
+
+
 def estimate(spec):
     """Worst-case USD for one build of `spec`, step by step. Reserved up front, settled to actual."""
+    from .spec import assembly_wanted
+    if assembly_wanted(spec):
+        steps = [s for s in _estimate_steps(spec) if s[0].startswith(REFERENCE_STEPS)]
+        steps += estimate_assembly(spec)
+        steps.append(("review the result against the picture (vision)", LLM_CALL_ALLOWANCE_USD))
+        steps.append(("director chat overhead", 2 * LLM_CALL_ALLOWANCE_USD))
+        total = round(sum(u for _, u in steps), 4)
+        return {"steps": steps, "usd": total, "credits": config.credits_for_usd(total), "build_mode": "assembly"}
+    steps = _estimate_steps(spec)
+    total = round(sum(u for _, u in steps), 4)
+    return {"steps": steps, "usd": total, "credits": config.credits_for_usd(total), "build_mode": "single"}
+
+
+def _estimate_steps(spec):
     steps = []
     seed_payload = {"texture_quality": "detailed", "geometry_quality": "detailed"}
     quad = config.SEED_QUAD if config.SEED_QUAD is not None else spec.category in config.HARD_SURFACE_CATEGORIES
@@ -189,21 +235,6 @@ def estimate(spec):
     steps.append(("which end is the front (vision)", LLM_CALL_ALLOWANCE_USD))
     if spec.category == "environment" and spec.style == "realistic":
         steps.append(("tiling PBR material set from the reference (Patina)", price("fal-ai/patina")))
-    if getattr(spec, "retexture", False):
-        steps.append(("repaint of the existing mesh (Meshy retexture, original UVs)", price(config.RETEXTURE_MODEL)))
-    from .stages.seed import hybrid_wanted
-    if hybrid_wanted(spec) and not getattr(spec, "retexture", False):
-        if repaint_mode(spec) == "pictures":
-            steps.append(("hybrid repaint of the seed (its renders repainted by the picture model, baked in Blender)",
-                          REPAINT_PICTURES * image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD))
-        else:
-            steps.append(("hybrid repaint of the seed (Meshy retexture, original UVs)", price(config.RETEXTURE_MODEL)))
-    if spec.category in config.HARD_SURFACE_CATEGORIES and (spec.part_seeds or spec.tri_budget >= 150000):
-        steps.append(("separately seeded parts (up to 2: picture + seed each)", 2 * (image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD
-                      + price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"}))))
-    if getattr(spec, "cockpit", False):
-        steps.append(("cockpit as a second model: picture + seed", 2 * image_price(concept_model(spec)) + LLM_CALL_ALLOWANCE_USD
-                      + price(config.SEED_MODEL, {"geometry_quality": "detailed", "texture_quality": "detailed"})))
     if spec.glass:
         steps.append(("glass masks, 5 views (SAM 3)", 5 * price("fal-ai/sam-3/image")))
     if spec.rig and spec.category == "vehicle":
@@ -214,18 +245,11 @@ def estimate(spec):
         steps.append(("humanoid auto-rig with walk/run (Meshy)", price("fal-ai/meshy/rigging")))
     steps.append(("Blender finish: decimate, orient, scale, LODs, collision, maps, FBX/GLB", 0.0))
     steps.append(("review the result against the picture (vision)", LLM_CALL_ALLOWANCE_USD))
-    for part in (getattr(spec, "add_parts", None) or []):
-        if part.get("seed"):
-            steps.append(("added part %s: fit the seed already bought (facing check)" % part.get("name", "?"), LLM_CALL_ALLOWANCE_USD))
-        else:
-            steps.append(("added part %s: picture + seed" % part.get("name", "?"),
-                          image_price(edit_model(spec)) + LLM_CALL_ALLOWANCE_USD + price(config.SEED_MODEL, seed_payload)))
     steps.append(("director chat overhead", 2 * LLM_CALL_ALLOWANCE_USD))
-    total = round(sum(u for _, u in steps), 4)
-    return {"steps": steps, "usd": total, "credits": config.credits_for_usd(total)}
+    return steps
 
 
-SEED_STEPS = ("3D seed", "extra views for multiview seeding", "hybrid repaint of the seed")
+SEED_STEPS = ("3D seed", "extra views for multiview seeding")
 PICTURE_STEPS = ("concept picture", "clean up your reference picture", "find a photo of", "check the picture",
                  "second picture attempt")
 
@@ -250,11 +274,9 @@ def estimate_after_reference(spec):
 
 
 def estimate_rework(spec, mode="refinish"):
-    """Worst case of finishing an EXISTING mesh: no main seed and no reference pictures (a retexture keeps the picture
-    steps for its guide picture). The cockpit and part seeds the finish may still buy stay in (an imported A-10 cost
-    $0.76 of cockpit against a 12-credit hold, 2026-09-23)."""
-    est = estimate(spec)
-    steps = [(name, usd) for name, usd in est["steps"]
-             if not name.startswith(SEED_STEPS) and (mode == "retexture" or not name.startswith(PICTURE_STEPS))]
+    """Worst case of finishing an EXISTING mesh: no seed and no reference pictures, only the probe, masks, rig and
+    review calls of the finish."""
+    steps = [(name, usd) for name, usd in _estimate_steps(spec)       # a rework finishes one mesh, never an assembly
+             if not name.startswith(SEED_STEPS) and not name.startswith(PICTURE_STEPS)]
     usd = sum(u for _, u in steps)
     return {"steps": steps, "usd": round(usd, 4), "credits": config.credits_for_usd(usd)}

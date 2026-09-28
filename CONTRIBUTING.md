@@ -5,44 +5,32 @@ that matter most. Thank you for them.
 
 ## What helps most
 
-- **Quality of the models.** Better reference pictures, better seed vendor settings, smarter Blender finishing
-  (glass, cockpits, wheels, part seeds, decimation, baking). Measure before and after on the same brief and put
-  the renders in the PR.
-- **New categories.** A skill is a Markdown file in `mastersmith/skills/` with front matter the pipeline reads.
-  See the README section "Adding a skill or a vendor".
-- **New vendors.** One row in `mastersmith/pricing.py` and a call site in a stage. Unpriced endpoints are refused
-  on purpose, so the row is not optional.
+- **Quality of the models.** Better part pictures, better registration, smarter assembly (fit, materials, edges,
+  bore alignment, baking). Measure before and after on the same job - `out/<Name>/delivery/preview_views.png` from
+  both runs - and put the renders in the PR. Passes that repair a finished mesh after the fact are not taken:
+  build it right from the pictures instead.
+- **New categories.** A skill is a Markdown file in `mastersmith/skills/` with front matter the tools read.
+- **New meshers.** A vendor is one row in `mastersmith/pricing.py` and a payload in `ms.py`'s `_vendor_payload`;
+  a local model is a runner in `mastersmith/local.py`. Unpriced endpoints are refused on purpose.
 - **Engine importers.** `mastersmith/stages/package.py` writes the import notes; Unity and Godot get less love
   than Unreal today.
-- **The chat.** `web/` is a Next.js app on the Vercel AI SDK; the director itself is Python (`mastersmith/agent.py`).
+
+## How it is worked
+
+There is no service: a coding agent (Claude Code, Codex, ...) runs in the repo root, reads `AGENTS.md` and drives
+`python -m mastersmith.ms`. Read `AGENTS.md` and `.claude/skills/build/SKILL.md` before changing the tools; the
+rules there were learned on real builds and the dated notes in the code say why.
 
 ## Branches
 
-`master` is what people run; `dev` is where work lands. Open pull requests against `dev`. When `dev` is verified
-end to end (a real build through the containers), it is merged into `master`.
+`master` is what people run; `dev` is where work lands. Open pull requests against `dev`.
 
 ## Running the tests
 
 ```bash
-python -m pytest -q tests/test_core.py tests/test_syntax.py       # pure tests, no keys, a second
-MASTERSMITH_BLENDER_TESTS=1 python -m pytest -q tests/test_blender_synthetic.py   # needs Blender, about a minute
-cd web && npm run build && npm run lint
+python -m pytest -q tests                                      # pure tests, no keys, a few seconds
+MASTERSMITH_BLENDER_TESTS=1 python -m pytest -q tests/test_assembly.py   # registration and assembly in Blender, minutes
 ```
 
-A build that reaches fal or OpenRouter spends real money on your keys. Keep live runs out of tests.
-
-## Style
-
-Python: four-space indentation, one job per module, comments that say *why* (many carry the date and the asset that
-taught the lesson; keep doing that). No formatter is enforced; `ruff`-clean is welcome. TypeScript: the scaffold's
-ESLint config.
-
-## Secrets
-
-`.env` is ignored and must stay that way. Never paste a key, a signed URL or a customer picture into an issue.
-
-## Names inside .blend files
-
-Delivered `.blend` files carry the brief and the reference picture as datablocks named `ms_spec.json` and
-`ms_reference`; the finish's scratch attributes and images are `ms_*` too. `blend_to_seed.py` also reads the names
-early builds used, so keep both when you touch that script.
+Blender scripts cannot be unit-tested in full: run them on a real job (`ms assemble out/<Name>`) and look at the
+six views before and after.
