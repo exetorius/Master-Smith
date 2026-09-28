@@ -254,7 +254,7 @@ def job_view(row, user):
                         "rig": {k: v for k, v in (r.get("rig") or {}).items() if k != "notes"},
                         "bill": {k: v for k, v in (r.get("bill") or {}).items() if k not in ("fal_calls", "llm_calls", "image_calls")}},
             "files": ["/v1/jobs/%s/files/%s" % (row["id"], f) for f in files],
-            "previews": ["/v1/jobs/%s/files/%s" % (row["id"], f) for f in files if f.startswith(("preview_", "ref_"))],
+            "previews": ["/v1/jobs/%s/files/%s" % (row["id"], f) for f in files if f.startswith(("preview_", "ref_", "seed_"))],
             "pictures": job_pictures(row),
             "glb": next(("/v1/jobs/%s/files/%s" % (row["id"], f) for f in files if f.lower().endswith(".glb") and f.startswith("SM_")), None)}
 

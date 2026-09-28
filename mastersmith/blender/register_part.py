@@ -189,6 +189,12 @@ lo, hi = blib.dims(ob)
 ob.data.transform(Matrix.Translation(-(lo + hi) * 0.5))
 ob.name = "Part"
 bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath(args["out_blend"]), compress=True)
+if args.get("out_render"):
+    # the seed as the vendor made it (registered, untouched), for the page next to the picture it was made from
+    blib.setup_render(512, 24, look="preview")
+    st = blib.Stage(ob, look="preview")
+    st.render("iso", os.path.abspath(args["out_render"]))
+    st.close()
 result = {"mode": mode, "iou": round(float(best[1]), 3), "score": round(float(best[0]), 3), "aspect": round(float(best[2]), 3),
           "target_aspect": round(float(t_aspect), 3), "runner_up_iou": round(float(scores[1][1]), 3), "shear": round(shear, 4),
           "rotation": [[round(float(v), 4) if mode in ("yaw_sweep", "long_axis") else int(v) for v in row] for row in best[3]]}

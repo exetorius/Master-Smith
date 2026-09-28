@@ -702,7 +702,7 @@ scn.camera = cam
 for o in (hull, lod1, lod2):
     o.hide_render = True
 checks = {}
-for view in ("left", "front"):
+for view in ("left", "front", "top"):                   # top: parts off the centreline show only from above
     rec = blib.ortho_camera(cam, view, lo, hi, margin=1.08)
     path = os.path.join(OUT, "check_%s.png" % view)
     scn.render.filepath = path

@@ -75,7 +75,11 @@ clearly wrong, and GAPS: parts that should touch (a guard and the frame, a grip 
 showing between them - move the part so its box overlaps the neighbour's. Answer JSON only:
 {{"ok": true/false, "moves": [{{"name": "...", "side_box": [x_left, x_right, z_top, z_bottom], "front_span": [y_left, y_right]}}],
   "rebuild": [{{"name": "...", "why": "what is wrong with its shape"}}], "notes": "..."}}
-Coordinates in percent of the REFERENCE pictures, like the plan. Empty lists when nothing needs changing."""
+Coordinates in percent of the REFERENCE pictures, like the plan. Empty lists when nothing needs changing.
+The LAST picture shows the assembly from ABOVE (the forward end at the top of the picture). Parts that sit on the
+object's centreline (a barrel, a muzzle device, a rail, sights) must line up with the body along one straight line; a
+part off to one side, or a body that runs at a slant to them, is wrong: move the part's front_span, or rebuild the
+body when it is the slanted one."""
 
 
 def _code_from(text):
@@ -322,6 +326,7 @@ def build_code_part(job, spec, part, plan):
         if front_sq:
             rows.append((front_sq, os.path.join(out_dir, best["box_renders"]["front"])))
         cmp = _compare(rows, os.path.join(out_dir, "compare_%d.png" % round_no))
+        best["compare"] = cmp
         refine = REFINE_PROMPT.format(name=name, what=part["what"], code=best["code"])
         if not front_sq:
             refine = "(There is no front picture: the comparison has only the SIDE row.)\n" + refine
@@ -510,7 +515,7 @@ def build_vendor_part(job, spec, part, plan):
         job.log("  part %s: seeded by %s, registered to its side picture (IoU %.2f, runner-up %.2f)" % (
             name, model.split("/")[0], registered["iou"], registered["runner_up_iou"]))
         return {"blend": registered["blend"], "yaw": 0, "picture": picture, "seed": glb, "registration": registered,
-                "keep_depth": bool(yaw_sweep)}
+                "keep_depth": bool(yaw_sweep), "side_picture": register_to, "seed_render": registered.get("render")}
     oriented = orient_part(job, spec, {"name": name, "phrase": part["what"], "size_m": max(_size(part))}, glb)
     if not oriented:
         return None
@@ -572,14 +577,15 @@ def _register(job, name, glb, picture, out_dir, yaw_sweep=False):
         Image.fromarray((fg * 255).astype("uint8")).save(mask)
         res_path = os.path.join(out_dir, "registration.json")
         blend = os.path.join(out_dir, "registered.blend")
+        render = os.path.join(out_dir, "seed_render.png")
         _blender(job, "register_part.py", {"glb": glb, "mask": mask, "out_blend": blend, "out_json": res_path,
-                                           "yaw_sweep": bool(yaw_sweep)},
+                                           "yaw_sweep": bool(yaw_sweep), "out_render": render},
                  "register_%s" % name, timeout=600)
         res = json.load(open(res_path))
         if res.get("iou", 0) < 0.35:
             job.log("  part %s: registration too weak (IoU %.2f); asking which side is the front instead" % (name, res.get("iou", 0)))
             return None
-        return {**res, "blend": blend}
+        return {**res, "blend": blend, "render": render if os.path.exists(render) else None}
     except Exception as exc:  # noqa: BLE001 - the facing question is the fallback
         job.log("  part %s: registration failed (%s); asking which side is the front instead" % (name, str(exc)[:120]))
         return None
@@ -684,6 +690,11 @@ def _check(job, plan, out, report):
         crop = os.path.join(work, "asm_%s.png" % view)
         crop_to_object(os.path.join(out, report["check_renders"][view]["file"]), crop)
         pics.append(draw_grid(crop, os.path.join(work, "asm_%s_grid.png" % view), boxes=boxes))
+    top = (report.get("check_renders") or {}).get("top")
+    if top:
+        crop = os.path.join(work, "asm_top.png")
+        crop_to_object(os.path.join(out, top["file"]), crop)
+        pics.append(crop)
     listing = json.dumps([{"name": p["name"], "what": p["what"][:80], "side_box": p["side_box"], "front_span": p["front_span"]}
                           for p in plan["parts"]])
     prompt = CHECK_PROMPT.format(parts=listing)
@@ -692,6 +703,23 @@ def _check(job, plan, out, report):
                   "part's front_span unless it is clearly wrong.\n") + prompt
     text = job.llm.vision(prompt, pics, model=config.BUILDER_MODEL, max_tokens=4000, effort="medium")
     return extract_json(text) or {"ok": True, "notes": "no readable answer"}
+
+
+def seed_images(plan, built, delivery):
+    """Every part's seed images into the delivery (seed_<Part>_<kind>.png), so the page shows how each part was made
+    next to the model: for a vendor part the picture the mesher got, the side picture it was registered to and the raw
+    mesh it returned; for a code part its last reference-against-build comparison."""
+    import shutil
+    out = []
+    for p in plan["parts"]:
+        b = built.get(p["name"]) or {}
+        for kind, src in (("picture", b.get("picture")), ("side", b.get("side_picture")), ("mesh", b.get("seed_render")),
+                          ("compare", b.get("compare"))):
+            if src and os.path.exists(src):
+                name = "seed_%s_%s.png" % (p["name"], kind)
+                shutil.copy2(src, os.path.join(delivery, name))
+                out.append(name)
+    return out
 
 
 def build_assembly(job, spec, ref):
@@ -771,6 +799,7 @@ def build_assembly(job, spec, ref):
                 built[p["name"]] = b
         job.stage("assemble")
     delivery, report = _assemble(job, spec, plan, built, "final", reference)
+    report["seed_images"] = seed_images(plan, built, delivery)
     report["assembly"] = record
     report["build_mode"] = "assembly"
     with open(os.path.join(delivery, "report.json"), "w") as f:

@@ -191,7 +191,7 @@ def build(spec, user, wallet, log=print, job_id=None):
             job.stage("review")
             log("4/4 review")
             renders = [os.path.join(delivery_dir, r) for r in report["renders"]]
-            result["review"] = review(job, ref["views"][0], renders, report)
+            result["review"] = review(job, ref["views"][0], renders, report, ref["views"][1:2])
             result["gate"] = gate_check(spec, report, result["review"], delivery_dir)
             if result["gate"]["warnings"]:
                 log("gate: " + "; ".join(result["gate"]["warnings"]))
@@ -214,7 +214,7 @@ def build(spec, user, wallet, log=print, job_id=None):
         job.stage("review")
         log("4/4 review")
         renders = [os.path.join(result["delivery_dir"], r) for r in report["renders"]]
-        result["review"] = review(job, ref["views"][0], renders, report)
+        result["review"] = review(job, ref["views"][0], renders, report, ref["views"][1:2])
         result["gate"] = gate_check(spec, report, result["review"], result["delivery_dir"])
         if result["gate"]["warnings"]:
             log("gate: " + "; ".join(result["gate"]["warnings"]))

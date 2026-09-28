@@ -218,7 +218,11 @@ def test_code_parts_build_and_assemble_into_a_game_ready_asset():
         assert {m["role"] for m in rep["maps"]} == {"BC", "N", "ORM"}
         assert rep["dimensions_m"][0] == pytest.approx(0.3, abs=0.005) and rep["dimensions_m"][2] == pytest.approx(0.095, abs=0.004)
         assert [l["lod"] for l in rep["lods"]] == [0, 1, 2] and rep["collision"]["triangles"] <= 256
-        assert set(rep["check_renders"]) == {"left", "front"} and len(rep["detail_renders"]) == 2
+        assert set(rep["check_renders"]) == {"left", "front", "top"} and len(rep["detail_renders"]) == 2
+        six = os.path.join(d, "six.json")
+        json.dump({"glb": os.path.join(d, "out", "SM_T.glb"), "out_dir": os.path.join(d, "six"), "size": 96}, open(six, "w"))
+        _blender("six_views.py", six)
+        assert sorted(json.load(open(os.path.join(d, "six", "views.json")))) == ["back", "bottom", "front", "left", "right", "top"]
         assert {s["name"] for s in rep["sockets"]} >= {"Muzzle", "Sight"}
         for f in rep["files"]:
             assert os.path.exists(os.path.join(d, "out", f)), f

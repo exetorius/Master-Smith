@@ -544,3 +544,13 @@ def test_the_job_store_survives_the_worker_and_requests_at_once(tmp_path):
         t.join()
     assert errors == []
     assert len(st.job("job")["log"].splitlines()) == 600
+
+
+def test_six_view_gate_needs_every_view_ok():
+    from mastersmith.stages.review import six_view_gate
+    ok = {v: "ok" for v in ("left", "right", "front", "back", "top", "bottom")}
+    assert six_view_gate({"score": 8, "verdict": "ship", "views": dict(ok)})["verdict"] == "ship"
+    j = six_view_gate({"score": 8, "verdict": "ship", "views": {**ok, "front": "defect: barrel off the centreline"}})
+    assert j["verdict"] == "rebuild" and j["score"] == 5 and "front view: barrel off the centreline" in j["issues"][-1]
+    assert six_view_gate({"score": 8, "verdict": "ship", "views": {**ok, "bottom": "minor: soft grip"}})["verdict"] == "ship with notes"
+    assert six_view_gate({"score": 8, "verdict": "ship", "views": {"left": "ok"}})["verdict"] == "rebuild"
