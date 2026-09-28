@@ -45,3 +45,17 @@ def test_cli_transcript_writes_pictures_and_tool_replies_become_tool_calls():
     assert json.loads(m["tool_calls"][0]["function"]["arguments"]) == {"name": "Crate"}
     assert llm_cli._as_message('{"content": "hello"}', tools) == {"role": "assistant", "content": "hello"}
     assert llm_cli.claude_model("anthropic/claude-opus-5.5") == "opus"
+
+
+def test_paid_pictures_let_only_fal_picture_models_through_no_spend(monkeypatch):
+    monkeypatch.setattr(config, "NO_SPEND", True)
+    monkeypatch.setattr(config, "PAID_PICTURES", True)
+    from mastersmith.fal import _is_picture_model
+    assert _is_picture_model("fal-ai/nano-banana-2/edit") and not _is_picture_model("fal-ai/esrgan")
+    fal = Fal(key="unused", log=lambda *_: None)
+    with pytest.raises(FalError, match="refused"):
+        fal.run("tripo3d/h3.1/image-to-3d", {"image_url": "x"})
+    class S:
+        seed_vendor, picture_model, premium, category = "tripo", "google/gemini-3-pro-image", False, "weapon"
+    assert pricing.seed_vendor(S())["key"] == "local"                 # meshes stay free
+    assert pricing.edit_model(S()) == config.EDIT_MODEL                # an OpenRouter picture model is never used
