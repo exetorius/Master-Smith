@@ -5,7 +5,7 @@ description: Build a game-ready hard-surface asset (weapon, vehicle, aircraft, p
 
 # Build an asset with `ms`
 
-`PY=.venv/Scripts/python.exe -m mastersmith.ms`. Everything below is run from the repo root. Read CLAUDE.md's rules
+`PY=.venv/Scripts/python.exe -m mastersmith.ms`. Everything below is run from the repo root. Read AGENTS.md's rules
 first; read `mastersmith/skills/<category>.md` for the category. Say the cost of a step before spending.
 
 ## 1. Brief
@@ -43,8 +43,10 @@ sweeps) and look again. IoU under 0.5 usually means the quarter picture was a di
 Meshing with `--vendor hitem3d3` ($2.10) only when the owner asks; the kept pictures make that a one-liner later.
 
 ## 6. Assemble and review
-`$PY assemble out/<Name>` (5-15 min) -> `delivery/SM_<Name>.glb`, previews, `preview_views.png`.
-Read `preview_views.png` and every `preview_*.png`. Check, in this order, and fix before anything else:
+`$PY assemble out/<Name>` (5-15 min) -> `delivery/SM_<Name>.glb`, previews, `preview_views.png`, `preview.html`.
+`$PY preview out/<Name>` serves the page and opens it for the owner: a 3D viewer of the GLB, the six views, the
+previews, the reference pictures and every part's pictures beside its registered seed. Give the owner that URL.
+Read `preview_views.png` and every `preview_*.png` yourself. Check, in this order, and fix before anything else:
 1. Function (common sense): barrel, muzzle, sights and receiver on one axis from the FRONT and the TOP; the bore
    is at the muzzle's centre; wheels on the ground; nothing floating, nothing poking through, no gaps at joins.
 2. Proportions against the side picture: each part in its box, the magazine not fat, the barrel not thin.

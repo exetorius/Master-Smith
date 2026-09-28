@@ -1,5 +1,5 @@
-"""`ms`: Master Smith as a set of small tools for a Claude Code session in this folder. No server, no container, no
-model calls of its own - the person (or Claude Code) looks at the pictures and decides; each command does one
+"""`ms`: Master Smith as a set of small tools for a coding-agent session in this folder. No server, no container, no
+model calls of its own - the person (or the agent) looks at the pictures and decides; each command does one
 deterministic thing and writes into a job folder under out/<Name>/:
 
     out/<Name>/brief.json                 what is being built
@@ -12,12 +12,13 @@ deterministic thing and writes into a job folder under out/<Name>/:
     python -m mastersmith.ms picture out/BullpupCarbine --out ref/ref_0.png --prompt "..." [--ref photo.jpg] [--model nano|local]
     python -m mastersmith.ms view out/BullpupCarbine --which side|front|back|left --from ref/ref_0.png [--mirror]
     python -m mastersmith.ms grid out/BullpupCarbine --side ref/side.png [--front ref/front.png] [--mirror]
-    python -m mastersmith.ms plan out/BullpupCarbine plan.json          (plan.json written by hand, see CLAUDE.md)
+    python -m mastersmith.ms plan out/BullpupCarbine plan.json          (plan.json written by hand, see AGENTS.md)
     python -m mastersmith.ms part-pictures out/BullpupCarbine Handguard [--fixes "..."] [--erased] [--no-quarter]
     python -m mastersmith.ms mesh out/BullpupCarbine Handguard [--vendor local|tripo|hitem3d3] [--from quarter|side]
     python -m mastersmith.ms register out/BullpupCarbine Magazine [--from quarter|side] [--yaw 180] [--pitch -30]
     python -m mastersmith.ms assemble out/BullpupCarbine [--parts A,B] [--no-sharpen]
     python -m mastersmith.ms sheet path/to/any.glb [--out sheet.png]
+    python -m mastersmith.ms preview out/BullpupCarbine [--no-open]   (delivery/preview.html served and opened)
     python -m mastersmith.ms package out/BullpupCarbine
     python -m mastersmith.ms status out/BullpupCarbine
 """
@@ -26,7 +27,10 @@ import glob
 import json
 import os
 import shutil
+import socket
+import subprocess
 import sys
+import webbrowser
 
 from PIL import Image, ImageOps
 
@@ -288,7 +292,88 @@ def cmd_assemble(a):
     print("  size %s m, LOD0 %s tris" % (rep.get("dimensions_m"), (rep.get("lods") or [{}])[0].get("triangles")))
     print("  previews: " + ", ".join(os.path.join(delivery, r) for r in rep["renders"]))
     print("  six views: %s" % sheet)
+    print("  page: %s  (ms preview %s opens it)" % (write_preview(job), a.job))
     print("Now LOOK at the six views and the previews (Read them) before calling it good.")
+
+
+PREVIEW_HTML = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>%(name)s</title>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+<style>
+ body{margin:0;font:14px/1.4 system-ui,sans-serif;background:#1c1d20;color:#ddd}
+ h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:24px 0 8px;color:#9ab} small{color:#999}
+ header,section{padding:16px 24px} header{background:#26272b;border-bottom:1px solid #333}
+ model-viewer{width:100%%;height:70vh;background:#3a3b40;border-radius:6px}
+ .row{display:flex;flex-wrap:wrap;gap:12px} .row img{max-width:360px;background:#fff;border-radius:4px}
+ .sheet{width:100%%;max-width:1536px}
+ table{border-collapse:collapse;width:100%%} td,th{padding:6px 8px;border-bottom:1px solid #333;vertical-align:top;text-align:left}
+ td img{height:150px;background:#fff;border-radius:4px;margin-right:4px} .lod button{margin-right:6px}
+</style></head><body>
+<header><h1>%(name)s</h1><small>%(desc)s</small><br><small>%(dims)s m &middot; LOD0 %(tris)s tris &middot; %(nparts)d parts &middot; %(engine)s</small></header>
+<section>
+<model-viewer id="mv" src="%(glb)s" camera-controls camera-orbit="-35deg 78deg 110%%" exposure="1.1" shadow-intensity="0.6" environment-image="neutral" alt="%(name)s"></model-viewer>
+<div class="lod" style="margin-top:8px">%(lods)s <button onclick="mv.autoRotate=!mv.autoRotate">rotate</button></div>
+</section>
+<section><h2>Six views</h2>%(sheet)s</section>
+<section><h2>Previews</h2><div class="row">%(previews)s</div></section>
+<section><h2>Reference and plan</h2><div class="row">%(refs)s</div></section>
+<section><h2>Parts: picture the mesher got, side picture it was registered to, the seed as registered</h2>
+<table><tr><th>part</th><th>pictures</th><th>seed</th><th>registration</th></tr>%(parts)s</table></section>
+<script>const mv=document.getElementById('mv');function lod(f){mv.src=f}</script>
+</body></html>"""
+
+
+def write_preview(job):
+    """delivery/preview.html: the GLB in a <model-viewer>, the six views, the previews, the reference pictures and
+    every part's pictures beside its registered seed. Relative links, so the page needs the job folder served
+    (`ms preview`): a browser will not fetch a GLB from file://."""
+    delivery = job.path("delivery")
+    rep = json.load(open(os.path.join(delivery, "report.json")))
+    name = job.spec.name
+    lods = [g for g in sorted(glob.glob(os.path.join(delivery, "SM_%s*.glb" % name)))]
+    lod_buttons = "".join("<button onclick=\"lod('%s')\">%s</button>" % (os.path.basename(g), os.path.basename(g)[len("SM_%s" % name):-4].strip("_") or "LOD0")
+                          for g in lods)
+    rel = lambda path: os.path.relpath(path, delivery).replace(os.sep, "/")
+    imgs = lambda paths: "".join('<a href="%s"><img src="%s" title="%s"></a>' % (rel(p), rel(p), os.path.basename(p)) for p in paths if os.path.exists(p))
+    previews = [os.path.join(delivery, r) for r in (rep.get("renders") or []) + (rep.get("detail_renders") or [])]
+    refs = sorted(glob.glob(job.path("ref", "*.png"))) + [job.path("plan", "side_grid.png"), job.path("plan", "front_grid.png")]
+    rows = []
+    plan = _plan(job) if os.path.exists(job.path("plan", "plan.json")) else {"parts": []}
+    for p in plan["parts"]:
+        d = job.path("parts", p["name"])
+        reg = json.load(open(os.path.join(d, "registration.json"))) if os.path.exists(os.path.join(d, "registration.json")) else {}
+        mm = [round((b - x) * 1000) for x, b in zip(p["box_min"], p["box_max"])]
+        rows.append("<tr><td><b>%s</b><br><small>%s<br>%s mm, %s %s</small></td><td>%s</td><td>%s</td><td><small>%s</small></td></tr>" % (
+            p["name"], p["what"][:160], mm, p["material"]["finish"], p["material"]["color"],
+            imgs([os.path.join(d, "quarter.png"), os.path.join(d, "side.png")]), imgs([os.path.join(d, "seed_render.png")]),
+            ("%s, IoU %.2f" % (reg.get("mode"), reg.get("iou", 0))) if reg else "not meshed"))
+    sheet = os.path.join(delivery, "preview_views.png")
+    html = PREVIEW_HTML % {
+        "name": name, "desc": job.spec.description, "dims": " x ".join("%.3f" % v for v in rep.get("dimensions_m") or []),
+        "tris": format((rep.get("lods") or [{}])[0].get("triangles", 0), ","), "nparts": len(plan["parts"]), "engine": job.spec.engine,
+        "glb": os.path.basename(lods[0]) if lods else "", "lods": lod_buttons,
+        "sheet": '<a href="preview_views.png"><img class="sheet" src="preview_views.png"></a>' if os.path.exists(sheet) else "<small>not rendered</small>",
+        "previews": imgs(previews), "refs": imgs(refs), "parts": "".join(rows)}
+    out = os.path.join(delivery, "preview.html")
+    open(out, "w", encoding="utf-8").write(html)
+    return out
+
+
+def cmd_preview(a):
+    job = Job(a.job)
+    if not os.path.exists(job.path("delivery", "report.json")):
+        sys.exit("nothing assembled yet: ms assemble %s first" % a.job)
+    page = write_preview(job)
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    # a small static server on the job folder, left running in the background; the page links across ref/, plan/, parts/
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+    subprocess.Popen([sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", job.dir],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+    url = "http://127.0.0.1:%d/delivery/preview.html" % port
+    print("preview: %s  (%s)" % (url, page))
+    if not a.no_open:
+        webbrowser.open(url)
 
 
 def cmd_sheet(a):
@@ -354,6 +439,7 @@ def main(argv=None):
     s.add_argument("--yaw", type=float, default=0.0); s.add_argument("--pitch", type=float, default=0.0); s.set_defaults(fn=cmd_register)
     s = sub.add_parser("assemble"); s.add_argument("job"); s.add_argument("--parts"); s.add_argument("--no-sharpen", action="store_true"); s.set_defaults(fn=cmd_assemble)
     s = sub.add_parser("sheet"); s.add_argument("glb"); s.add_argument("--out"); s.set_defaults(fn=cmd_sheet)
+    s = sub.add_parser("preview"); s.add_argument("job"); s.add_argument("--no-open", action="store_true"); s.set_defaults(fn=cmd_preview)
     s = sub.add_parser("package"); s.add_argument("job"); s.set_defaults(fn=cmd_package)
     s = sub.add_parser("status"); s.add_argument("job"); s.set_defaults(fn=cmd_status)
     a = ap.parse_args(argv)
