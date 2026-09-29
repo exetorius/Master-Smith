@@ -333,9 +333,11 @@ def surface_detail(o, mat, strength=1.0, mats=None, vendor=False):
     metal = bool(mat.get("metal"))
     finish = mat.get("finish") or ("metal" if metal else "polymer")
     rubber = finish == "rubber"
-    # a mesher's surface is bumpy everywhere, so curvature finds "edges" all over it: a vendor part gets a third of
-    # the wear a clean code part gets (white flecks over the pistol's slide, 2026-09-28)
-    wear_k = 0.3 if vendor else 1.0
+    # a mesher's surface is bumpy everywhere, so curvature finds "edges" all over it: a vendor part gets a tenth of
+    # the wear a clean code part gets and a quarter of the grime (a third and 0.6 still mottled the bullpup's polymer
+    # receiver like grey stone, owner 2026-09-29; white flecks over the pistol's slide, 2026-09-28)
+    wear_k = 0.1 if vendor else 1.0
+    grime_k = 0.25 if vendor else 1.0
     for m in (mats if mats is not None else {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}):
         t = m.node_tree
         b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
@@ -395,7 +397,7 @@ def surface_detail(o, mat, strength=1.0, mats=None, vendor=False):
         gf.operation = "MULTIPLY"
         gf.use_clamp = True
         K.new(cavity.outputs["Result"], gf.inputs[0])
-        gf.inputs[1].default_value = 0.55 * strength * (0.6 if vendor else 1.0)
+        gf.inputs[1].default_value = 0.55 * strength * grime_k
         K.new(gf.outputs[0], grime.inputs["Factor"])
         K.new(lighten.outputs["Result"], grime.inputs["A"])
         grime.inputs["B"].default_value = (0.45, 0.44, 0.43, 1.0)
