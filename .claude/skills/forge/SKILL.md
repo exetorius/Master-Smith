@@ -77,6 +77,9 @@ Meshing with `--vendor hitem3d3` ($2.10) only when the owner asks; the kept pict
 `$PY assemble out/<Name>` (5-15 min) -> `delivery/SM_<Name>.glb`, previews, `preview_views.png`, `preview.html`.
 `$PY preview out/<Name>` serves the page and opens it for the owner: a 3D viewer of the GLB, the six views, the
 previews, the reference pictures and every part's pictures beside its registered seed. Give the owner that URL.
+The page is served by the `preview` command and dies with it: after EVERY assemble that is reported to the owner
+(the first one and every re-assemble after a fix), run `$PY preview out/<Name>` again (in the background) and put
+the fresh URL in the message. A delivery message without a live preview link is incomplete (owner, 2026-09-29).
 Read `preview_views.png` and every `preview_*.png` yourself. Check, in this order, and fix before anything else:
 1. Function (common sense): barrel, muzzle, sights and receiver on one axis from the FRONT and the TOP; the bore
    is at the muzzle's centre; wheels on the ground; nothing floating, nothing poking through, no gaps at joins.
@@ -96,6 +99,8 @@ defects named by view. Do not call it good under 7 without saying why.
 
 ## 7. Package
 `$PY package out/<Name>` -> `delivery/<Name>.zip` with README and manifest. Tell the owner the path.
+The delivery message always carries, in this order: the preview URL (from a `preview` run started after the last
+assemble), the GLB path, the zip path, the score /10 with the defects by view, and what was spent.
 
 ## Re-meshing kept parts later
 The pictures in `parts/<Part>/` are the asset's source. `$PY mesh out/<Name> <Part> --vendor hitem3d3` (or a new
