@@ -35,23 +35,13 @@ FAL_PRICES = {
 }
 
 
-# Worst-case USD for ONE picture. fal ids (the default: the same account as the meshes) are fal's fixed per-image
-# prices at 1K; OpenRouter ids are per-image output token prices as of 2026-09-18, and the reported usage.cost is what
-# gets billed there.
+# Worst-case USD for ONE picture: fal's fixed per-image prices at 1K (the same account as the meshes), and $0 for the
+# picture model on this PC.
 IMAGE_PRICES = {
     "fal-ai/nano-banana-2": 0.08, "fal-ai/nano-banana-2/edit": 0.08,
     "fal-ai/nano-banana": 0.04, "fal-ai/nano-banana/edit": 0.04,
     "fal-ai/nano-banana-pro": 0.15, "fal-ai/nano-banana-pro/edit": 0.15,
     "fal-ai/flux-2": 0.02, "fal-ai/flux-2/edit": 0.04, "fal-ai/flux-2-pro": 0.05,
-    "google/gemini-3.1-flash-image": 0.08,
-    "google/gemini-3.1-flash-image-preview": 0.08,
-    "google/gemini-3.1-flash-lite-image": 0.04,
-    "google/gemini-2.5-flash-image": 0.04,
-    "google/gemini-3-pro-image": 0.16,
-    "google/gemini-3-pro-image-preview": 0.16,
-    "openai/gpt-5.4-image-2": 0.10,
-    "openai/gpt-5-image": 0.12,
-    "openai/gpt-5-image-mini": 0.03,
     "local/flux2-klein-4b": 0.0,                 # FLUX.2 klein 4B on this PC (mastersmith/local.py): free, ~11 s a picture
 }
 
@@ -69,10 +59,6 @@ def image_price(model):
 PICTURE_NAMES = {           # what the providers call them; the ids are what the APIs take
     "fal-ai/nano-banana-2": "Nano Banana 2", "fal-ai/nano-banana": "Nano Banana", "fal-ai/nano-banana-pro": "Nano Banana Pro",
     "fal-ai/flux-2": "FLUX 2", "fal-ai/flux-2-pro": "FLUX 2 Pro",
-    "google/gemini-3.1-flash-image": "Nano Banana 2", "google/gemini-3.1-flash-image-preview": "Nano Banana 2 (preview)",
-    "google/gemini-3.1-flash-lite-image": "Nano Banana 2 Lite", "google/gemini-2.5-flash-image": "Nano Banana",
-    "google/gemini-3-pro-image": "Nano Banana Pro", "google/gemini-3-pro-image-preview": "Nano Banana Pro (preview)",
-    "openai/gpt-5.4-image-2": "GPT-5.4 Image 2", "openai/gpt-5-image": "GPT-5 Image", "openai/gpt-5-image-mini": "GPT-5 Image Mini",
     "local/flux2-klein-4b": "FLUX.2 klein 4B (free)",
 }
 
@@ -83,7 +69,7 @@ def picture_catalogue():
     for mid, usd in IMAGE_PRICES.items():
         if mid.endswith("-preview") or mid.endswith("/edit"):
             continue                                   # preview ids alias the released ones; /edit is derived from the base id
-        provider = "fal.ai" if mid.startswith("fal-ai/") else "this PC" if mid.startswith("local/") else "OpenRouter"
+        provider = "this PC" if mid.startswith("local/") else "fal.ai"
         out.append({"id": mid, "label": "%s · %s (%s) · $%.2f a picture" % (PICTURE_NAMES.get(mid, mid), provider, mid, usd),
                     "name": PICTURE_NAMES.get(mid, mid), "provider": provider, "usd": usd, "default": mid == config.CONCEPT_MODEL})
     return sorted(out, key=lambda r: (not r["default"], r["provider"] != "fal.ai", r["usd"]))
@@ -95,7 +81,7 @@ def edit_model(spec=None):
     if config.NO_SPEND:
         if not config.PAID_PICTURES:
             return config.LOCAL_PICTURE_MODEL
-        return chosen if chosen in IMAGE_PRICES and not chosen.startswith(("google/", "openai/")) else config.EDIT_MODEL
+        return chosen if chosen in IMAGE_PRICES else config.EDIT_MODEL
     return chosen if chosen in IMAGE_PRICES else config.EDIT_MODEL
 
 
@@ -126,9 +112,10 @@ def price(model, payload=None):
     return round(usd, 4)
 
 
-# A generous per-call allowance for a vision LLM call; settled to the real usage.cost after.
-FREE_LLM = config.LLM_BACKEND != "openrouter"   # Claude Code / Codex on the owner's subscription: $0 a call
-LLM_CALL_ALLOWANCE_USD = 0.0 if FREE_LLM else 0.03
+# Model calls run on a coding-agent CLI on the owner's subscription: $0 a call (kept as a constant so the estimate
+# steps that name a check still add up).
+FREE_LLM_CALLS = True                            # every model call runs on the CLI, so the builder steps are $0
+LLM_CALL_ALLOWANCE_USD = 0.0
 
 
 # The mesh vendors a build can pick (Spec.seed_vendor; empty = the default). Shown in the chat's model selector.
@@ -170,8 +157,8 @@ def vendor_catalogue():
 
 
 # Assembly builds: what the builder model's calls and the vendor parts cost at most. Settled to actual usage.cost.
-BUILDER_CALL_USD = 0.0 if FREE_LLM else 0.30         # one builder call with pictures (plan, big part code, checks)
-BUILDER_SMALL_CALL_USD = 0.0 if FREE_LLM else 0.08   # one call of the cheaper builder for a small part
+BUILDER_CALL_USD = 0.0 if FREE_LLM_CALLS else 0.30         # one builder call with pictures (plan, big part code, checks)
+BUILDER_SMALL_CALL_USD = 0.0 if FREE_LLM_CALLS else 0.08   # one call of the cheaper builder for a small part
 ASSEMBLY_CODE_PARTS = 10            # the worst case reserves this many code parts at 2.5 builder calls each
 ASSEMBLY_BIG_PARTS = 3              # of which this many are big enough for the main builder
 ASSEMBLY_VENDOR_PARTS = 12 if config.NO_SPEND else 3     # free on this PC: a modeller's split, many small parts

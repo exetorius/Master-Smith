@@ -72,8 +72,8 @@ mastersmith/config.py      keys, paths, model routing
 mastersmith/pricing.py     price table (an unpriced endpoint is refused)
 mastersmith/fal.py         fal queue client; local/ ids route to this PC
 mastersmith/local.py       TRELLIS.2 and FLUX.2 klein on this PC
-mastersmith/images.py      picture generation and edits (fal, OpenRouter, local)
-mastersmith/llm.py, llm_cli.py   the few model calls some helpers make: claude -p / codex exec / OpenRouter
+mastersmith/images.py      picture generation and edits (fal, local)
+mastersmith/llm.py, llm_cli.py   the few model calls some helpers make: claude -p / codex exec
 mastersmith/spec.py        the brief
 mastersmith/skills/*.md    per-category guidance (weapon, vehicle, aircraft, helicopter, prop, ...)
 mastersmith/stages/        plan (grids, validation, colour sampling), assembly (part pictures, registration),

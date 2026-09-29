@@ -56,6 +56,6 @@ def test_paid_pictures_let_only_fal_picture_models_through_no_spend(monkeypatch)
     with pytest.raises(FalError, match="refused"):
         fal.run("tripo3d/h3.1/image-to-3d", {"image_url": "x"})
     class S:
-        seed_vendor, picture_model, premium, category = "tripo", "google/gemini-3-pro-image", False, "weapon"
+        seed_vendor, picture_model, premium, category = "tripo", "nobody/some-image", False, "weapon"
     assert pricing.seed_vendor(S())["key"] == "local"                 # meshes stay free
-    assert pricing.edit_model(S()) == config.EDIT_MODEL                # an OpenRouter picture model is never used
+    assert pricing.edit_model(S()) == config.EDIT_MODEL                # an unknown picture model is never used

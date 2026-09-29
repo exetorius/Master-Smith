@@ -1,5 +1,5 @@
-"""Model calls answered by a coding-agent CLI on this PC instead of OpenRouter: Claude Code (`claude -p`) or Codex
-(`codex exec`), on the owner's own subscription. llm.LLM routes here when MASTERSMITH_LLM is "claude-code" or "codex".
+"""Model calls answered by a coding-agent CLI on this PC: Claude Code (`claude -p`) or Codex (`codex exec`), on the
+owner's own subscription. llm.LLM routes here; MASTERSMITH_LLM picks "claude-code" or "codex".
 
 Each call is one headless run in a fresh temporary folder. The OpenAI-style messages become one transcript; pictures
 become files (Claude Code reads them with its Read tool, Codex gets them attached with -i). Tool calling, which the
@@ -31,14 +31,14 @@ def _exe(name):
 
 
 def claude_model(model):
-    """An OpenRouter-style id -> the Claude Code model alias. MASTERSMITH_CLAUDE_MODEL forces one for every call."""
+    """A model name -> the Claude Code alias (opus / sonnet / haiku). MASTERSMITH_CLAUDE_MODEL forces one for every call."""
     if config.CLAUDE_CODE_MODEL:
         return config.CLAUDE_CODE_MODEL
     m = (model or "").lower()
     for alias in ("opus", "sonnet", "haiku"):
         if alias in m:
             return alias
-    return config.CLAUDE_CODE_DEFAULT       # Gemini / GPT ids (checks, review) -> a Claude model
+    return config.CLAUDE_CODE_DEFAULT       # no alias named -> the default
 
 
 def _effort(effort):

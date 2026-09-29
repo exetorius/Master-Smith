@@ -75,7 +75,7 @@ stacking boxes, and to list every feature it sees, with its position in mm, befo
 `build_mode` on the brief: `"assembly"` builds a hard surface as parts; unset or `"single"` builds one seed. Assembly
 is opt-in until it beats one seed on the same object (`MASTERSMITH_ASSEMBLY_DEFAULT=1` makes it the hard-surface
 default again). Big parts (a housing, a stock) are written by `MASTERSMITH_BUILDER_MODEL` (default Claude Opus 5.5 on
-OpenRouter), small ones (pins, levers, sights) by the cheaper `MASTERSMITH_BUILDER_MODEL_SMALL` (Claude Sonnet 5):
+a coding-agent CLI), small ones (pins, levers, sights) by the cheaper `MASTERSMITH_BUILDER_MODEL_SMALL` (Claude Sonnet 5):
 the builder calls were 97% of an assembly's cost. The vendor for parts follows the brief's `seed_vendor`: Hi3D v3
 when it names Hi3D, else Tripo.
 

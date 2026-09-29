@@ -1,16 +1,11 @@
-"""OpenRouter chat completions with tool calling and per-call cost capture (usage.cost); or, with MASTERSMITH_LLM set,
-the same calls answered by Claude Code or Codex on this PC (llm_cli.py)."""
+"""The few model calls some helpers still make (a picture check, the old planner and review paths), answered by a
+coding-agent CLI on this PC - Claude Code or Codex (llm_cli.py) - on the owner's subscription, at $0 a call."""
 import base64
 import json
-import time
 import os
 import re
 
-import requests
-
 from . import config
-
-URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 class LLMError(Exception):
@@ -19,14 +14,8 @@ class LLMError(Exception):
 
 class LLM:
     def __init__(self, key=None, log=print):
-        self.key = key or os.environ.get("OPENROUTER_API_KEY", "")
-        if config.LLM_BACKEND == "openrouter":
-            if config.NO_SPEND:
-                raise LLMError("MASTERSMITH_NO_SPEND=1 refuses OpenRouter: set MASTERSMITH_LLM=claude-code or codex")
-            if not self.key:
-                raise LLMError("OPENROUTER_API_KEY is not set (put it in .env)")
-        elif config.LLM_BACKEND not in ("claude-code", "codex"):
-            raise LLMError("MASTERSMITH_LLM must be openrouter, claude-code or codex, not %r" % config.LLM_BACKEND)
+        if config.LLM_BACKEND not in ("claude-code", "codex"):
+            raise LLMError("MASTERSMITH_LLM must be claude-code or codex, not %r" % config.LLM_BACKEND)
         self.log = log
         self.calls = []
         self.stage = ""                  # the pipeline names the stage; every call carries it for the cost breakdown
@@ -34,50 +23,15 @@ class LLM:
     def chat(self, messages, model=None, tools=None, max_tokens=1200, temperature=0.3, json_only=False, effort="low"):
         """Returns the assistant message dict (content, tool_calls) and records its cost.
 
-        Reasoning models spend their thinking INSIDE max_tokens: Gemini 3.8 Flash used 477 of a 500-token
-        budget on reasoning and cut the JSON answer off mid-word (2026-09-16). Effort is pinned low - the
-        planner fills a form and the checker answers yes/no questions - and JSON answers are requested as such."""
-        if config.LLM_BACKEND != "openrouter":
-            from . import llm_cli
-            try:
-                msg, rec = llm_cli.chat(messages, model or config.LLM_MODEL, tools=tools, json_only=json_only,
-                                        effort=effort, log=self.log)
-            except llm_cli.CLIError as exc:
-                raise LLMError(str(exc))
-            self.calls.append({**rec, "stage": self.stage})
-            return msg
-        body = {"model": model or config.LLM_MODEL, "messages": messages, "max_tokens": max_tokens,
-                "temperature": temperature, "usage": {"include": True}, "reasoning": {"effort": effort}}
-        if json_only:
-            body["response_format"] = {"type": "json_object"}
-        if tools:
-            body["tools"] = tools
-            body["tool_choice"] = "auto"
-        r = None
-        for attempt in range(3):
-            try:
-                r = requests.post(URL, headers={"Authorization": "Bearer " + self.key, "Content-Type": "application/json",
-                                                "HTTP-Referer": "https://github.com/kevinpbuckley/Master-Smith", "X-Title": "Master Smith"},
-                                  data=json.dumps(body), timeout=180)
-                if r.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-                    time.sleep(5 * (attempt + 1))
-                    continue
-                break
-            except (requests.ConnectionError, requests.Timeout) as exc:
-                # one slow OpenRouter read killed a whole production job at "reading the brief" (M4A1, wave 19)
-                if attempt == 2:
-                    raise LLMError("openrouter unreachable after 3 attempts: %s" % str(exc)[:200])
-                time.sleep(5 * (attempt + 1))
-        if r.status_code != 200:
-            raise LLMError("openrouter HTTP %d: %s" % (r.status_code, r.text[:400]))
-        data = r.json()
-        if data.get("error"):
-            raise LLMError("openrouter: %s" % str(data["error"])[:400])
-        usage = data.get("usage") or {}
-        usd = float(usage.get("cost") or 0.0)
-        self.calls.append({"model": body["model"], "usd": usd, "tokens_in": usage.get("prompt_tokens"),
-                           "tokens_out": usage.get("completion_tokens"), "stage": self.stage})
-        msg = data["choices"][0]["message"]
+        Effort is pinned low - the planner fills a form and the checker answers yes/no questions - and JSON answers
+        are requested as such. `max_tokens` and `temperature` are kept for the callers; the CLIs do not take them."""
+        from . import llm_cli
+        try:
+            msg, rec = llm_cli.chat(messages, model or config.LLM_MODEL, tools=tools, json_only=json_only,
+                                    effort=effort, log=self.log)
+        except llm_cli.CLIError as exc:
+            raise LLMError(str(exc))
+        self.calls.append({**rec, "stage": self.stage})
         return msg
 
     def vision(self, prompt, image_paths, model=None, max_tokens=1500, effort="low", json_only=True):

@@ -1,4 +1,4 @@
-"""The free tier: pictures and meshes from models on this PC instead of fal / OpenRouter.
+"""The free tier: pictures and meshes from models on this PC instead of fal.
 
 Pictures: FLUX.2 [klein] 4B through ComfyUI (text -> picture, and edits from up to 4 reference pictures), ~11 s each on
 an RTX 4080 Laptop. Meshes: TRELLIS.2 through trellis.cpp (image -> textured PBR GLB), 1.5-6.5 min at res 1024.

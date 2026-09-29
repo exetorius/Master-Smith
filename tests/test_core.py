@@ -154,55 +154,6 @@ def test_portable_spec_drops_local_pictures():
     assert sp3.reference_images[0] == "https://cdn/v1.png"
 
 
-def test_image_client_and_cost_breakdown():
-    import base64
-    import io
-    import json as _json
-
-    from PIL import Image
-
-    from mastersmith import images as im_mod
-    from mastersmith.images import ImageRefused, Images
-    buf = io.BytesIO()
-    Image.new("RGB", (8, 8), (200, 10, 10)).save(buf, format="PNG")
-    good = {"data": [{"b64_json": base64.b64encode(buf.getvalue()).decode(), "media_type": "image/png"}], "usage": {"cost": 0.0123}}
-
-    class Resp:
-        def __init__(self, status, body, text=""):
-            self.status_code, self._body, self.text = status, body, text or _json.dumps(body)
-
-        def json(self):
-            return self._body
-
-    class Http:
-        def __init__(self, answers):
-            self.answers, self.sent = list(answers), []
-
-        def post(self, url, headers=None, data=None, timeout=None):
-            self.sent.append(_json.loads(data))
-            return self.answers.pop(0)
-    monkeypatch_sleep = im_mod.time.sleep
-    im_mod.time.sleep = lambda s: None
-    try:
-        cl = Images(key="k", log=lambda m: None)
-        with tempfile.TemporaryDirectory() as d:
-            cl.http = Http([Resp(200, good)])
-            cl.stage = "reference"
-            out = cl.generate("a crate", os.path.join(d, "a.png"), model="google/gemini-3.1-flash-image", references=[])
-            assert Image.open(out).size == (8, 8) and cl.spent() == 0.0123 and cl.calls[0]["stage"] == "reference"
-            cl.http = Http([Resp(200, good)])
-            cl.generate("edit", os.path.join(d, "b.png"), model="google/gemini-3.1-flash-image", references=[out, "https://x/y.png"])
-            refs = cl.http.sent[-1]["input_references"]
-            assert refs[0]["image_url"]["url"].startswith("data:image/png;base64,") and refs[1]["image_url"]["url"] == "https://x/y.png"
-            cl.http = Http([Resp(400, {"error": {"message": "Gemini could not generate an image (STOP)"}}, "could not generate")])
-            with pytest.raises(ImageRefused):
-                cl.generate("gore", os.path.join(d, "c.png"), model="google/gemini-3.1-flash-image")
-            with pytest.raises(pricing.Unpriced):
-                cl.generate("x", os.path.join(d, "f.png"), model="nobody/unknown-image")
-    finally:
-        im_mod.time.sleep = monkeypatch_sleep
-
-
 def test_reference_estimates_split_the_picture_stage():
     jet = Spec(build_mode="single", name="Jet", description="grey jet", category="aircraft")
     full, pics, rest = pricing.estimate(jet), pricing.estimate_reference(jet), pricing.estimate_after_reference(jet)
@@ -229,8 +180,8 @@ def test_picture_model_choice_drives_the_estimate_and_the_catalogue():
     assert cat[0]["id"] == config.CONCEPT_MODEL and cat[0]["default"] and "Nano Banana 2" in cat[0]["label"]
     assert not any(c["id"].endswith("-preview") for c in cat)
     crate = Spec(name="Crate", description="oak crate", category="prop")
-    lite = Spec(name="Crate", description="oak crate", category="prop", picture_model="google/gemini-3.1-flash-lite-image")
-    assert pricing.concept_model(lite) == "google/gemini-3.1-flash-lite-image" == pricing.edit_model(lite)
+    lite = Spec(name="Crate", description="oak crate", category="prop", picture_model="fal-ai/flux-2")
+    assert pricing.concept_model(lite) == "fal-ai/flux-2" == pricing.edit_model(lite)
     assert pricing.edit_model(crate) == config.EDIT_MODEL
     assert pricing.estimate(lite)["usd"] < pricing.estimate(crate)["usd"]
     bogus = Spec(name="Crate", description="oak crate", category="prop", picture_model="nobody/unknown")
@@ -241,7 +192,7 @@ def test_pictures_come_from_fal_by_default_and_edits_use_the_edit_endpoint():
     from mastersmith.images import fal_endpoint, fal_payload
     cat = pricing.picture_catalogue()
     assert cat[0]["id"] == "fal-ai/nano-banana-2" and cat[0]["default"] and cat[0]["provider"] == "fal.ai"
-    assert not any(c["id"].endswith("/edit") for c in cat) and any(c["provider"] == "OpenRouter" for c in cat)
+    assert not any(c["id"].endswith("/edit") for c in cat) and {c["provider"] for c in cat} == {"fal.ai", "this PC"}
     assert fal_endpoint("fal-ai/nano-banana-2", True) == "fal-ai/nano-banana-2/edit"
     assert fal_endpoint("fal-ai/nano-banana-2", False) == "fal-ai/nano-banana-2"
     assert fal_endpoint("fal-ai/nano-banana-2/edit", True) == "fal-ai/nano-banana-2/edit"

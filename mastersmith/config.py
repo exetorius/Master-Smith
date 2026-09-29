@@ -1,5 +1,5 @@
-"""Environment, paths and model routing. Keys come from <repo>/.env (FAL_KEY; OPENROUTER_API_KEY only for the
-openrouter LLM backend). Read by the ms tools (mastersmith/ms.py) and the stage modules they use."""
+"""Environment, paths and model routing. The one key, FAL_KEY, comes from <repo>/.env. Read by the ms tools
+(mastersmith/ms.py) and the stage modules they use."""
 import os
 from pathlib import Path
 
@@ -32,14 +32,14 @@ BLENDER_BIN = os.environ.get("BLENDER_BIN", r"C:\Program Files\Blender Foundatio
 BLENDER_FLAGS = ["-b", "-Y"]
 
 # --- the few model calls the helpers still make (the three-quarter picture check, the old planner/review paths).
-# Who answers them: "openrouter" (pay per call), or a coding
-# agent on this PC on the owner's own subscription: "claude-code" (`claude -p`) or "codex" (`codex exec`).
-LLM_BACKEND = os.environ.get("MASTERSMITH_LLM", "openrouter").strip().lower()
+# Who answers them: a coding agent on this PC on the owner's own subscription, "claude-code" (`claude -p`) or "codex"
+# (`codex exec`). $0 a call.
+LLM_BACKEND = os.environ.get("MASTERSMITH_LLM", "claude-code").strip().lower()
 CLAUDE_CODE_MODEL = os.environ.get("MASTERSMITH_CLAUDE_MODEL", "")          # forces one alias for every call
-CLAUDE_CODE_DEFAULT = os.environ.get("MASTERSMITH_CLAUDE_DEFAULT", "sonnet")  # for non-Claude ids (Gemini checks)
+CLAUDE_CODE_DEFAULT = os.environ.get("MASTERSMITH_CLAUDE_DEFAULT", "sonnet")  # when a call names no model
 CODEX_MODEL = os.environ.get("MASTERSMITH_CODEX_MODEL", "")                 # empty = Codex's own default
-# No spending at all: every paid fal / OpenRouter call is refused before it is made, pictures and meshes run on this
-# PC (local/ ids), the model calls need a CLI backend, and paid-only steps (rigging, texture tiles) are skipped.
+# No spending at all: every paid fal call is refused before it is made and pictures and meshes run on this PC
+# (local/ ids).
 NO_SPEND = os.environ.get("MASTERSMITH_NO_SPEND", "0") == "1"
 # ...except pictures: with this on, the fal picture models (Nano Banana) still run under no-spend. They keep a design
 # far better than the local FLUX.2 klein, and a build draws few (owner, 2026-09-27: "we should use nano banana").
@@ -51,14 +51,13 @@ BODY_SEED_VIEW = os.environ.get("MASTERSMITH_BODY_SEED_VIEW", "").strip().lower(
 # Every part of an assembly from the mesher, none modelled in Blender code (owner, 2026-09-28: "I don't want to
 # sculpt any parts with Blender, try fully sculpting with TRELLIS"). "0" brings the code parts back.
 ALL_VENDOR = os.environ.get("MASTERSMITH_ALL_VENDOR", "1") == "1"
-# the default model for those calls (the old name MASTERSMITH_DIRECTOR_MODEL still works; there is no director since
-# 2026-09-28, the coding agent in the repo root is the director)
-LLM_MODEL = os.environ.get("MASTERSMITH_LLM_MODEL") or os.environ.get("MASTERSMITH_DIRECTOR_MODEL", "google/gemini-3.8-flash")
-VISION_MODEL = os.environ.get("MASTERSMITH_VISION_MODEL", "google/gemini-3.8-flash")
-# Assembly builds (docs/ASSEMBLY.md): the builder plans the parts, writes the code parts and checks the assembly.
-BUILDER_MODEL = os.environ.get("MASTERSMITH_BUILDER_MODEL", "anthropic/claude-opus-5.5")
-# small parts (pins, levers, sights) are written by a cheaper model: the builder calls were 97% of an assembly's cost
-BUILDER_MODEL_SMALL = os.environ.get("MASTERSMITH_BUILDER_MODEL_SMALL", "anthropic/claude-sonnet-5")
+# the models for those calls, as Claude Code aliases (opus / sonnet / haiku; Codex ignores them). Empty = the default
+# alias above. There is no director since 2026-09-28: the coding agent in the repo root is the director.
+LLM_MODEL = os.environ.get("MASTERSMITH_LLM_MODEL", "")
+VISION_MODEL = os.environ.get("MASTERSMITH_VISION_MODEL", "")
+# the old planner / part-code paths (docs/ASSEMBLY.md)
+BUILDER_MODEL = os.environ.get("MASTERSMITH_BUILDER_MODEL", "opus")
+BUILDER_MODEL_SMALL = os.environ.get("MASTERSMITH_BUILDER_MODEL_SMALL", "sonnet")
 # Assembly is opt-in until it beats one seed on the same object (owner, 2026-09-27): "1" makes it the hard-surface default
 ASSEMBLY_DEFAULT = os.environ.get("MASTERSMITH_ASSEMBLY_DEFAULT", "0") == "1"
 ASSEMBLY_MAX_PARTS = int(os.environ.get("MASTERSMITH_ASSEMBLY_MAX_PARTS", "24"))
@@ -66,8 +65,7 @@ ASSEMBLY_WORKERS = int(os.environ.get("MASTERSMITH_ASSEMBLY_WORKERS", "4"))
 ASSEMBLY_CHECK_ROUNDS = int(os.environ.get("MASTERSMITH_ASSEMBLY_CHECK_ROUNDS", "2"))
 # --- fal endpoints by role. One vendor per role; the 2026-09-16 bake-off picked these.
 # --- pictures come from fal too (fal-ai/nano-banana-2 and friends; a fal id with reference pictures runs the /edit
-# endpoint), so one account covers pictures and meshes. OpenRouter image ids (google/gemini-3.1-flash-image, ...) still
-# work anywhere a picture model is named. Ids and prices in pricing.IMAGE_PRICES; every one has a MASTERSMITH_* override.
+# endpoint), so one account covers pictures and meshes. Ids and prices in pricing.IMAGE_PRICES.
 CONCEPT_MODEL = os.environ.get("MASTERSMITH_CONCEPT_MODEL", "fal-ai/nano-banana-2")        # text -> clean product shot
 CONCEPT_MODEL_PREMIUM = os.environ.get("MASTERSMITH_CONCEPT_PREMIUM", "fal-ai/nano-banana-pro")
 # Hard-surface categories get a stronger picture model: the seed reproduces every 2D error as geometry, and
@@ -104,8 +102,8 @@ LOCAL_TRELLIS_QUANT = os.environ.get("MASTERSMITH_LOCAL_TRELLIS_QUANT", "q8")   
 # slower (485 s against 146 s on the pistol, 2026-09-27); the atlas then goes to 4096
 LOCAL_TRELLIS_TEX_RES = os.environ.get("MASTERSMITH_LOCAL_TRELLIS_TEX_RES", "")
 
-# --- spend. You run this against your own fal and OpenRouter keys; the ledger only keeps score of what they spent,
-# in cents. Nothing is charged, held or refused here.
+# --- spend. You run this against your own fal key; the estimates keep score in cents. Nothing is charged, held or
+# refused here.
 CREDIT_USD = 0.01                                # one credit is one cent
 
 

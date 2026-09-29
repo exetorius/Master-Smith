@@ -5,7 +5,7 @@ every part is drawn alone, meshed alone, registered to its picture and fitted in
 2026-09-28 the owner works it from here: the coding agent (Claude Code, Codex, or another that reads this file) is
 the director, planner and reviewer; the deterministic tools
 in `python -m mastersmith.ms` do the drawing, meshing, registering and assembling. No server, no web page, no
-container, no OpenRouter: the service, the chat app and the one-seed finish were deleted on 2026-09-28 (git
+container, no paid model API: the service, the chat app and the one-seed finish were deleted on 2026-09-28 (git
 history before commit "Delete the service" has them).
 
 Run everything from this folder with the venv: `.venv/Scripts/python.exe -m mastersmith.ms <command>`.

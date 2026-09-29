@@ -18,7 +18,7 @@ def free_spec(**kw):
 
 
 def test_a_free_build_estimates_nothing_for_pictures_and_mesh(monkeypatch):
-    monkeypatch.setattr(pricing, "LLM_CALL_ALLOWANCE_USD", 0.0)     # the vision checks still run on OpenRouter
+    monkeypatch.setattr(pricing, "LLM_CALL_ALLOWANCE_USD", 0.0)     # (already $0: the checks run on the CLI)
     est = pricing.estimate(free_spec())
     assert est["usd"] == 0, est["steps"]
     assert pricing.concept_model(free_spec()) == config.LOCAL_PICTURE_MODEL

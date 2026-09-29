@@ -56,7 +56,7 @@ class Spec:
                                       # seeds from; the picture stage is skipped
     build_mode: str = None            # None -> assembly for hard surfaces with a side + front view, else one seed;
                                       # "assembly" | "single" force a path (docs/ASSEMBLY.md)
-    picture_model: str = None         # OpenRouter image model for this build's pictures (concept, edits, views); None -> config
+    picture_model: str = None         # picture model (a fal-ai/ or local/ id) for this build's pictures (concept, edits, views); None -> config
 
     def __post_init__(self):
         # Asset name rule: letters, digits, underscores, hyphens, starting with a letter. Anything
