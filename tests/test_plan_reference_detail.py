@@ -11,3 +11,10 @@ def test_reference_detail_flag_is_kept_and_defaults_true():
     by = {p["name"]: p for p in plan["parts"]}
     assert by["FrontSight"]["reference_detail"] is False
     assert by["Barrel"]["reference_detail"] is True
+
+
+def test_color_lock_keeps_the_planned_colour():
+    from mastersmith.stages.plan import clean_material
+    m = clean_material({"color": "#1e2024", "finish": "metal", "color_lock": True})
+    assert m["color_lock"] is True and m["color"] == "#1e2024"
+    assert clean_material({"color": "#1e2024"})["color_lock"] is False

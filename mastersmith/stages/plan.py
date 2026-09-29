@@ -214,7 +214,7 @@ def sample_colours(plan, threshold=0.1):
     changed = []
 
     def sample(box, mat, name):
-        if mat.get("glass") or mat.get("finish") == "glass":
+        if mat.get("glass") or mat.get("finish") == "glass" or mat.get("color_lock"):
             return
         x0, x1, zt, zb = box
         if (x1 - x0) * (zb - zt) < 150:
@@ -323,7 +323,10 @@ def clean_material(mat):
         finish = "metal" if mat.get("metal") else "glass" if mat.get("glass") else "polymer"
     return {"color": colour, "finish": finish, "metal": bool(mat.get("metal")) or finish == "metal",
             "roughness": round(rough, 3), "glass": bool(mat.get("glass")) or finish == "glass",
-            "keep_texture": bool(mat.get("keep_texture"))}
+            "keep_texture": bool(mat.get("keep_texture")),
+            # 2026-09-29: "color_lock" keeps the planned colour when the box is mostly a neighbour (the barrel run
+            # back through the handguard sampled the handguard's grey)
+            "color_lock": bool(mat.get("color_lock"))}
 
 
 def validate_plan(raw, dims, max_parts=None):
