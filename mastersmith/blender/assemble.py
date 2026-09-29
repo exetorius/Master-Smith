@@ -572,7 +572,7 @@ for p in args["parts"]:
     o = import_part(p)
     rec = {"name": p["name"], "kind": p["kind"], "box_min": p["box_min"], "box_max": p["box_max"], **fit(o, p)}
     # code parts carry the reference's fine detail; vendor parts already have their own texture
-    if p["kind"] == "code" and args.get("detail") and not (p.get("material") or {}).get("glass"):
+    if p["kind"] == "code" and args.get("detail") and p.get("reference_detail", True) and not (p.get("material") or {}).get("glass"):
         rec["reference_detail"] = add_reference_detail(o, args["detail"])
     if p["kind"] == "vendor" and not (p.get("material") or {}).get("glass") and args.get("tint_vendor", True):
         zoned = split_zones(o, p.get("zones") or [])

@@ -346,7 +346,10 @@ def validate_plan(raw, dims, max_parts=None):
                 # (rails, sights, trigger, barrel) and meshes only the sculpted ones (receiver, grip, handguard)
                 "method": method if method in ("code", "vendor") else ("vendor" if config.ALL_VENDOR else "code"),
                 "side_box": [pct(v) for v in p["side_box"]], "front_span": [pct(v) for v in p["front_span"]],
-                "box_min": box_min, "box_max": box_max, "material": clean_material(p.get("material"))}
+                "box_min": box_min, "box_max": box_max, "material": clean_material(p.get("material")),
+                # 2026-09-28: a code part whose shape is not the drawn one (the bullpup's folding sights) opts out of the
+                # reference detail projection: the picture's hood interior printed a pale patch on the code sight
+                "reference_detail": bool(p.get("reference_detail", True))}
         if part["method"] == "vendor":
             zones = []
             for z in (p.get("zones") or [])[:12]:

@@ -268,7 +268,7 @@ def cmd_part_pictures(a):
                                                     + (" " + a.fixes if a.fixes else "")), quarter,
                             model=model, references=refs, aspect_ratio="4:3")
         print("three-quarter picture:", quarter)
-    print("Look at both (Read them). Redraw with --fixes '...' if the design drifted.")
+    print("Look at both (Read them). Redraw with --redraw --fixes '...' if the design drifted (ask the owner first).")
 
 
 def _vendor_payload(vendor, url):
@@ -494,7 +494,8 @@ def cmd_assemble(a):
                 print("  %s: not built yet (ms build), left out" % p["name"])
                 continue
             parts.append({"name": p["name"], "kind": "code", "box_min": p["box_min"], "box_max": p["box_max"], "material": p["material"],
-                          "centreline": bool(p.get("centreline")), "zones": [], "blend": blend, "yaw": 0})
+                          "centreline": bool(p.get("centreline")), "zones": [], "blend": blend, "yaw": 0,
+                          "reference_detail": bool(p.get("reference_detail", True))})
             continue
         blend = os.path.join(d, "registered.blend")
         if not os.path.exists(blend):

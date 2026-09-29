@@ -51,11 +51,21 @@ are in `mastersmith/blender/hskit.py`: box, cylinder, tube, profile, revolve, cu
 fillet). `$PY build out/<Name> <Part>` -> `parts/<Part>/<Part>.blend` and `<Part>_side/front/iso.png`. Read the
 renders next to `side.png`; edit and build again until the shape and the orientation are right. No pictures needed
 for a code part, but `part-pictures` for it is still worth the $0.16 when the shape is not obvious from the plan.
+When the part picture and common sense disagree (a barrel drawn thick at the muzzle, an AR T-handle for a bullpup's
+side slot, eleven fine teeth on a 68 mm rail), common sense and the reference picture win; say so in the review.
+
+## 5a. Part review gate: every part passes before anything is assembled
+Nothing goes to `assemble` until every part has been judged AGAINST ITS PICTURE, not as a shape alone (2026-09-28:
+a magazine built as a straight box went unnoticed until the owner asked for the comparison). For each part, Read
+its `side.png` (and `quarter.png`) beside its render (`<Part>_side.png` and `<Part>_iso.png` for a code part,
+`seed_render.png` for a meshed one) and give the owner one table: part, pass/fail, what differs. Fail means fix at
+that part's step (edit build.py, re-register, redraw and re-mesh) and review again. Tell the owner the table, with
+the failures and their fixes, before step 6.
 
 ## 5. Mesh and register (free with TRELLIS)
 `$PY mesh out/<Name> <Part>` for each part -> `seed.glb`, then registered to its side picture -> `registered.blend`,
-`seed_render.png`, IoU printed. Read `seed_render.png` beside `side.png`: same orientation, forward end right,
-upright. If not: `$PY register out/<Name> <Part> --yaw 180` (or `--pitch -30`, degrees; `--from side` to skip the
+`seed_render.png`, IoU printed. Read `seed_render.png` beside `side.png` and `quarter.png`: same object, same
+orientation, forward end right, upright, nothing missing. If not: `$PY register out/<Name> <Part> --yaw 180` (or `--pitch -30`, degrees; `--from side` to skip the
 sweeps) and look again. IoU under 0.5 usually means the quarter picture was a different object: redraw it.
 Meshing with `--vendor hitem3d3` ($2.10) only when the owner asks; the kept pictures make that a one-liner later.
 

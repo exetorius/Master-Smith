@@ -32,8 +32,8 @@ reads the file). Read it before a build. Agent-specific notes live in that agent
 - Nano Banana picture (`--model nano`, the default for `picture`, `view`, `part-pictures`): about $0.08 each,
   the three-quarter picture too. A 14-part gun is about 28 pictures = ~$2.30. `nano-pro` costs more; use it only
   for the hero reference picture.
-- TRELLIS local mesh (`mesh --vendor local`): free, ~1 min per part on this PC. Tripo (`--vendor tripo`) ~$0.30;
-  Hi3D v3 (`--vendor hitem3d3`) $2.10 per part - only when the owner asks for the paid mesher.
+- TRELLIS local mesh (`mesh --vendor local`): free, ~1 min per part on this PC. Tripo (`--vendor tripo`,
+  tripo3d/h3.1) $0.60 per part (billed 2026-09-28; not $0.30). Hi3D v3 (`--vendor hitem3d3`) $2.10 per part - only when the owner asks for the paid mesher.
 - Blender passes: free. Registration ~30 s, assembly 5-15 min, six views ~2 min.
 Say the estimate before a step that spends, in one line; never spend on a step the owner did not ask for.
 
@@ -92,7 +92,8 @@ object's full width, centred parts symmetric about 50.
  "notes": "anything the assembly must respect"}
 ```
 `zones` are areas of a part in a different material (rubber pad on a polymer stock, glass lens on a scope). `metal`
-is true only for bare metal. A rifle is 10-16 parts, a pistol 6-10, a truck 12-20, an aircraft 8-14.
+is true only for bare metal. `"reference_detail": false` on a code part skips projecting the reference picture's
+surface detail onto it (for a part whose coded shape is not the drawn one: folding sights, 2026-09-28). A rifle is 10-16 parts, a pistol 6-10, a truck 12-20, an aircraft 8-14.
 
 ## Commands (`python -m mastersmith.ms ...`)
 
