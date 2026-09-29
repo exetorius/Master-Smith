@@ -8,6 +8,15 @@ description: Build a game-ready hard-surface asset (weapon, vehicle, aircraft, p
 `PY=.venv/Scripts/python.exe -m mastersmith.ms`. Everything below is run from the repo root. Read AGENTS.md's rules
 first; read `mastersmith/skills/<category>.md` for the category. Say the cost of a step before spending.
 
+## 0. Pictures that already exist are used, never redrawn without asking
+Before ANY step that draws (2, 4, and `--fixes` redraws): `$PY status out/<Name>` (or `ls out/<Name>/ref
+out/<Name>/parts/*/`) and look at what is there. `ref/ref_*.png`, `parts/<Part>/side.png`, `parts/<Part>/quarter.png`
+and `parts/<Part>/build.py` are the asset's source, kept on purpose (a job cleared down to them is normal: meshes,
+registrations and deliveries are rebuilt for free). When they exist, show the owner the list and ASK whether to use
+them or draw again; use them unless told otherwise. The tools refuse to draw over an existing picture (`kept: ...
+already exists`); `--redraw` is passed only after the owner said to draw again. `ms new` on an existing job keeps its
+pictures and brief (`--rebrief` rewrites the brief).
+
 ## 1. Brief
 `$PY new <Name> --category weapon|vehicle|aircraft|helicopter|prop --size <longest side, m> --description "..."`
 Sizes: a rifle 0.65-1.0 m, a pistol 0.2 m, a truck 5-6 m, a gunship 12-18 m. `--tris 100000` for a hero asset.
@@ -29,11 +38,19 @@ Sizes: a rifle 0.65-1.0 m, a pistol 0.2 m, a truck 5-6 m, a gunship 12-18 m. `--
 - `$PY plan out/<Name> plan/plan_draft.json` -> prints the parts with their mm sizes, snapped heights and sampled
   colours. Check the sizes make sense (a barrel 13-25 mm across, a magazine 25-35 mm wide, a wheel round).
 
-## 4. Part pictures (about $0.16 per part)
+## 4. Part pictures (about $0.16 per part; vendor parts only)
 For each part: `$PY part-pictures out/<Name> <Part>` -> `parts/<Part>/side.png` and `quarter.png`. The biggest
 part's side picture is the approved side view with the other parts ERASED (nothing drawn); every other part is drawn
 alone from the approved view. Read both pictures per part: the part must be whole, alone, same design and colours,
 on white. Redraw with `--fixes "..."` when not.
+
+## 4b. Code parts (free, seconds each)
+Machined parts are `"method": "code"` in the plan. Write `out/<Name>/parts/<Part>/build.py` with
+`def build(kit, L, W, H)` (part-local frame: +X forward, +Y left, +Z up, metres, centred on the box; the kit's calls
+are in `mastersmith/blender/hskit.py`: box, cylinder, tube, profile, revolve, cut, union, hole, slot, array, rotate,
+fillet). `$PY build out/<Name> <Part>` -> `parts/<Part>/<Part>.blend` and `<Part>_side/front/iso.png`. Read the
+renders next to `side.png`; edit and build again until the shape and the orientation are right. No pictures needed
+for a code part, but `part-pictures` for it is still worth the $0.16 when the shape is not obvious from the plan.
 
 ## 5. Mesh and register (free with TRELLIS)
 `$PY mesh out/<Name> <Part>` for each part -> `seed.glb`, then registered to its side picture -> `registered.blend`,
@@ -52,7 +69,10 @@ Read `preview_views.png` and every `preview_*.png` yourself. Check, in this orde
 2. Proportions against the side picture: each part in its box, the magazine not fat, the barrel not thin.
 3. Materials: steel is dark and reflective, rubber matt, glass glassy, polymer satin; colours match the picture.
 4. Edges crisp, muzzle round, no blobs.
-A wrong part is fixed at its own step: re-register (5), redraw and re-mesh (4-5), or a better box (3, then `plan`
+A wrong outline is fixed on the mesh: `$PY fit out/<Name> <Part>` sculpts the seed onto its side picture; a
+local fault you can name, `$PY brush out/<Name> <Part> --op ...`; a part that is pure geometry (barrel, muzzle
+device, rail, sight), `$PY sdf out/<Name> <Part>` from a `sdf.py` you write (AGENTS.md, "Sculpting without a
+mouse"). Otherwise a wrong part is fixed at its own step: re-register (5), redraw and re-mesh (4-5), or a better box (3, then `plan`
 and `assemble` again); `--parts A,B` assembles a subset while checking. Score it /10 for the owner, with the
 defects named by view. Do not call it good under 7 without saying why.
 

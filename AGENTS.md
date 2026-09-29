@@ -49,11 +49,17 @@ Say the estimate before a step that spends, in one line; never spend on a step t
    the picture (`ms plan` samples them per part), not from guesses.
 4. Edges are crisp: the assembler sharpens planar faces; a soft-plastic look means the part picture was soft or the
    seed was bad - redraw or re-mesh, do not accept it.
-5. Every part is meshed from its OWN pictures (no Blender-coded parts since 2026-09-28: "try fully sculpting with
-   TRELLIS"). Split the way a modeller would: barrel, muzzle device, each rail, each sight, magazine, grip, stock,
+5. Hybrid since the evening of 2026-09-28 (the all-TRELLIS carbine came back "a mess": leaning sights, a rail that was
+   an upper receiver, crumpled edges): SCULPTED parts (receiver, grip, handguard, a hull, a tyre) are meshed from their
+   own pictures; MACHINED parts (rails, sights, trigger, charging handle, barrel, muzzle device, magazine, selector)
+   are `"method": "code"` - built by `parts/<Part>/build.py` with the hard-surface kit (`ms build`), crisp by
+   construction. Split the way a modeller would: barrel, muzzle device, each rail, each sight, magazine, grip, stock,
    handguard, each control, each wheel, each pod. Never lump (four tyres together came back as one black blob).
 6. The part pictures are kept in `parts/<Part>/` so the same parts can be meshed again with a better model later.
-   Never delete them.
+   Never delete them. They, `ref/ref_*.png` and `parts/<Part>/build.py` are the asset's SOURCE: before drawing
+   anything, check what exists (`ms status`) and ask the owner whether to use it; the picture tools refuse to draw
+   over an existing picture and only `--redraw`, after a yes, draws again (2026-09-28: a job is routinely cleared
+   down to its pictures and rebuilt for free).
 7. Sizes are read off the gridded picture as percent boxes; touching parts overlap 1-2 %; boxes cover the whole
    silhouette. Thin free-standing parts (barrel, muzzle) get their height measured off the silhouette by `ms plan`.
 8. The biggest part keeps the depth the mesher gave it (`keep_depth`); every other part fills its box on all three
@@ -97,9 +103,13 @@ is true only for bare metal. A rifle is 10-16 parts, a pistol 6-10, a truck 12-2
 | `view <job> --which side\|front\|back\|top\|quarter --from ref/ref_0.png [--mirror] [--fixes "..."]` | one standard view of the same object |
 | `grid <job> --side ref/ref_side.png [--front ref/ref_front.png] [--mirror]` | crops to the silhouette, draws the percent grids, writes dims.json |
 | `plan <job> plan.json` | validates your plan, snaps thin parts, samples colours, writes plan/plan.json |
-| `part-pictures <job> <Part> [--fixes "..."] [--no-quarter]` | side picture of that part alone + its three-quarter picture |
+| `part-pictures <job> <Part> [--fixes "..."] [--no-quarter] [--no-front] [--no-side]` | side picture of that part alone + its three-quarter picture (`--no-front`: quarter without the whole-object front view, which made 8 of 13 parts come back as the whole rifle) |
+| `build <job> <Part>` | a `"method": "code"` part: runs `parts/<Part>/build.py` (`def build(kit, L, W, H)`, kit in `mastersmith/blender/hskit.py`) -> `<Part>.blend` + side/front/iso renders |
 | `mesh <job> <Part> [--vendor local\|tripo\|hitem3d3] [--from quarter\|side]` | meshes the part and registers it |
 | `register <job> <Part> [--yaw deg] [--pitch deg] [--from side]` | registers again, with your correction |
+| `fit <job> <Part> [--quarter]` | sculpts the registered seed's outline onto its side picture (and three-quarter picture): visual hull + outline snap, reports silhouette overlap before/after; `registered_unfitted.blend` is the undo |
+| `brush <job> <Part> --op inflate\|move\|smooth\|flatten\|crease --at front+0,0,-0.01 --radius 10 --strength 2` | one headless brush stroke (mm; anchors front/back/top/bottom/left/right/centre); logged in `brush_log.json`, `--replay` after a re-mesh |
+| `sdf <job> <Part> [sdf.py]` | an exact part from `parts/<Part>/sdf.py` (`def part(kit, L, W, H)`, the kit in `mastersmith/sdfkit.py`): marching cubes in the part's box, imported as `registered.blend` with the planned material |
 | `assemble <job> [--parts A,B] [--no-sharpen]` | fits, tints, bakes, LODs, previews, six views |
 | `sheet <file.glb>` | six views of any GLB |
 | `preview <job> [--no-open]` | serves `delivery/preview.html` (3D viewer, six views, every part's pictures beside its seed) and opens it |
@@ -107,6 +117,27 @@ is true only for bare metal. A rifle is 10-16 parts, a pistol 6-10, a truck 12-2
 | `status <job>` | what the job has so far |
 
 `<job>` is `out/<Name>`. Every command prints where it wrote; Read those files.
+
+## Sculpting without a mouse
+
+Three tools stand in for an artist's hands; use them after looking, never blind.
+- **`fit`** when a seed's outline is off its picture (a fat magazine, a tapered handguard drawn straight): the
+  picture is the target. Check `seed_render.png` after; run `assemble` to see it in place.
+- **`brush`** for a local fix you can name: "the grip's heel swells 3 mm too far" -> `--op inflate --at back+0,0,-0.03
+  --radius 12 --strength -3`; a soft panel -> `--op flatten`; a rounded edge that should be crisp -> `--op crease --at
+  ... --to ...`. Coordinates are metres in the part's frame (centred, X forward, Z up); `--radius`/`--strength` in mm.
+- **`sdf`** for parts that ARE geometry: barrel, muzzle device, rails, sights, pins, knobs, magazine bodies. Write
+  `parts/<Part>/sdf.py`:
+  ```python
+  def part(kit, L, W, H):                        # the part's box, metres, centred at the origin, X forward
+      tube = kit.cylinder(W / 2, L, axis="x")
+      bore = kit.cylinder(kit.mm(5.56) / 2, L * 1.1, axis="x")
+      return tube - bore
+  ```
+  Idioms: a Picatinny rail = `box` minus `box(slot).repeat([mm(10), 0, 0], [n, 1, 1])`; a muzzle brake = `cylinder`
+  minus `cylinder(port, axis="y").repeat(...)` minus the bore; a moulded join = `smooth_union(a, b, mm(2))`; a
+  rounded body = `rounded_box`; a tapered stock comb = `wedge`; symmetric features = `.mirror("y")`. Sizes come
+  from the plan's box (L, W, H) and the mm you can read off the picture. Then `assemble`.
 
 ## Testing and code changes
 

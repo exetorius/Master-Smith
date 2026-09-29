@@ -14,8 +14,12 @@ deterministic thing and writes into a job folder under out/<Name>/:
     python -m mastersmith.ms grid out/BullpupCarbine --side ref/side.png [--front ref/front.png] [--mirror]
     python -m mastersmith.ms plan out/BullpupCarbine plan.json          (plan.json written by hand, see AGENTS.md)
     python -m mastersmith.ms part-pictures out/BullpupCarbine Handguard [--fixes "..."] [--erased] [--no-quarter]
+    python -m mastersmith.ms build out/BullpupCarbine TopRail          (a "method": "code" part from parts/TopRail/build.py)
     python -m mastersmith.ms mesh out/BullpupCarbine Handguard [--vendor local|tripo|hitem3d3] [--from quarter|side]
     python -m mastersmith.ms register out/BullpupCarbine Magazine [--from quarter|side] [--yaw 180] [--pitch -30]
+    python -m mastersmith.ms fit out/BullpupCarbine Magazine [--quarter]           (outline sculpted onto its pictures)
+    python -m mastersmith.ms brush out/BullpupCarbine Grip --op inflate --at back+0,0,-0.02 --radius 12 --strength 2
+    python -m mastersmith.ms sdf out/BullpupCarbine Barrel [sdf.py]                 (an exact part from a distance function)
     python -m mastersmith.ms assemble out/BullpupCarbine [--parts A,B] [--no-sharpen]
     python -m mastersmith.ms sheet path/to/any.glb [--out sheet.png]
     python -m mastersmith.ms preview out/BullpupCarbine [--no-open]   (delivery/preview.html served and opened)
@@ -90,9 +94,41 @@ def _part(plan, name):
     sys.exit("no part %s in the plan (have: %s)" % (name, ", ".join(p["name"] for p in plan["parts"])))
 
 
+def keep_existing(path, redraw=False):
+    """True when a picture is already there and must be kept. 2026-09-28: pictures cost money and were approved by the
+    owner; the tools never draw over one. `--redraw` draws again, and only after the owner said so."""
+    if redraw or not os.path.exists(path):
+        return False
+    print("kept: %s already exists (ask the owner; --redraw draws it again)" % path)
+    return True
+
+
+def existing_pictures(folder):
+    """Every picture a job already has: the reference pictures and each part's side/quarter picture."""
+    found = []
+    ref = os.path.join(folder, "ref")
+    if os.path.isdir(ref):
+        found += [os.path.join("ref", f) for f in sorted(os.listdir(ref)) if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))]
+    parts = os.path.join(folder, "parts")
+    if os.path.isdir(parts):
+        for part in sorted(os.listdir(parts)):
+            for f in ("side.png", "quarter.png", "build.py"):
+                if os.path.exists(os.path.join(parts, part, f)):
+                    found.append(os.path.join("parts", part, f))
+    return found
+
+
 # ------------------------------------------------------------------ commands
 def cmd_new(a):
     folder = os.path.join(str(config.OUT_DIR), a.name)
+    have = existing_pictures(folder) if os.path.isdir(folder) else []
+    if have:
+        print("job folder exists with %d pictures/builders already - they are kept; ask the owner before drawing any again:" % len(have))
+        for f in have:
+            print("  " + f)
+        if os.path.exists(os.path.join(folder, "brief.json")) and not a.rebrief:
+            print("brief.json kept too (--rebrief rewrites it)")
+            return
     os.makedirs(os.path.join(folder, "ref"), exist_ok=True)
     brief = {"name": a.name, "description": a.description, "category": a.category, "style": a.style, "engine": a.engine,
              "tri_budget": a.tris or 0, "size_m": a.size, "multiview": True, "build_mode": "assembly"}
@@ -103,6 +139,8 @@ def cmd_new(a):
 def cmd_picture(a):
     job = Job(a.job)
     out = job.path(a.out)
+    if keep_existing(out, a.redraw):
+        return
     os.makedirs(os.path.dirname(out), exist_ok=True)
     refs = [os.path.abspath(r) if os.path.exists(r) else job.path(r) for r in (a.ref or [])]
     model = PICTURE_MODELS.get(a.model, a.model)
@@ -115,6 +153,8 @@ def cmd_view(a):
     job = Job(a.job)
     src = job.path(a.src)
     out = job.path(a.out or "ref/ref_%s.png" % a.which)
+    if keep_existing(out, a.redraw):
+        return
     prompt = ("Show this exact same object from %s. Same object, same design, same colours, markings and materials, same "
               "lighting, plain pure white background, sharp focus, nothing else in frame. %s" % (VIEW_TEXT[a.which], a.fixes or "")).strip()
     job.images.generate(prompt, out, model=PICTURE_MODELS.get(a.model, a.model), references=[src], aspect_ratio="1:1")
@@ -172,6 +212,29 @@ def cmd_plan(a):
         print("  dropped %s: %s" % (d["name"], d["reason"]))
 
 
+def cmd_build(a):
+    """A code part: parts/<Part>/build.py holds `def build(kit, L, W, H)` (the hard-surface kit, see hskit.py); built in
+    its box's own frame, exported as <Part>.blend beside its renders. 2026-09-28: the hybrid build."""
+    job = Job(a.job)
+    plan = _plan(job)
+    part = _part(plan, a.part)
+    d = job.path("parts", part["name"])
+    os.makedirs(d, exist_ok=True)
+    src = os.path.join(d, "build.py")
+    if not os.path.exists(src):
+        sys.exit("no builder: write %s with `def build(kit, L, W, H)` (see mastersmith/blender/hskit.py)" % src)
+    size = [part["box_max"][i] - part["box_min"][i] for i in range(3)]
+    args = {"name": part["name"], "code": open(src, encoding="utf-8").read(), "size": size, "material": part["material"],
+            "out_dir": d, "render_size": 512}
+    _blender(job, "build_part.py", args, "build_%s" % part["name"])
+    res = json.load(open(os.path.join(d, part["name"] + ".json")))
+    if not res.get("ok"):
+        sys.exit("build failed: %s" % res.get("error"))
+    print("built: %s  box %s mm  fill %s  %s tris" % (res["blend"], [round(v * 1000) for v in size], res.get("fill"), res.get("triangles")))
+    print("renders: " + ", ".join(os.path.join(d, r) for r in res.get("renders", {}).values()))
+    print("Look at the renders next to side.png; edit build.py and build again if it is off.")
+
+
 def cmd_part_pictures(a):
     job = Job(a.job)
     plan = _plan(job)
@@ -180,7 +243,7 @@ def cmd_part_pictures(a):
     os.makedirs(d, exist_ok=True)
     side = os.path.join(d, "side.png")
     model = PICTURE_MODELS.get(a.model, a.model)
-    if a.no_side:
+    if a.no_side or keep_existing(side, a.redraw):
         print("side picture kept:", side)
     elif a.erased or (is_body(part, plan) and not a.drawn):
         _, erased = erased_body_picture(plan, part, side)
@@ -195,8 +258,8 @@ def cmd_part_pictures(a):
                             "photograph.%s %s" % (part["what"], leave, a.fixes or ""), side, model=model,
                             references=[plan["side"]], aspect_ratio="1:1")
         print("side picture:", side)
-    if not a.no_quarter:
-        quarter = os.path.join(d, "quarter.png")
+    quarter = os.path.join(d, "quarter.png")
+    if not a.no_quarter and not keep_existing(quarter, a.redraw):
         # 2026-09-28: the whole-object front view makes the model draw the whole object round a part (8 of 13 carbine
         # parts came back as the whole rifle); --no-front drops it and --fixes reaches this prompt too.
         front = plan.get("front") if not a.no_front else None
@@ -261,6 +324,160 @@ def cmd_register(a):
     _do_register(job, part, d, a.src == "quarter", a.yaw, a.pitch)
 
 
+# ---------------------------------------------------------------- sculpting: fit (#11), sdf (#12), brush (#13)
+def _mask_npz(picture, out):
+    """The picture's object mask (anything unlike the border), cropped tight, as a signed distance field in pixels
+    (+ outside) with its gradient, for blender/fit_part.py. -> path or None when the picture is empty"""
+    import numpy as np
+    from scipy import ndimage
+    a = np.asarray(Image.open(picture).convert("RGB")).astype(np.float32) / 255.0
+    border = np.concatenate([a[:6].reshape(-1, 3), a[-6:].reshape(-1, 3), a[:, :6].reshape(-1, 3), a[:, -6:].reshape(-1, 3)])
+    fg = np.abs(a - np.median(border, axis=0)).max(axis=2) > 0.1
+    if fg.mean() < 0.01:
+        return None
+    fg = ndimage.binary_fill_holes(fg)
+    ys, xs = np.nonzero(fg)
+    fg = np.pad(fg[ys.min():ys.max() + 1, xs.min():xs.max() + 1], 1, constant_values=False)   # the crop's edge is outside too
+    sdf = (ndimage.distance_transform_edt(~fg) - ndimage.distance_transform_edt(fg))[1:-1, 1:-1]
+    gy, gx = np.gradient(sdf)
+    np.savez(out, sdf=sdf.astype(np.float32), gx=gx.astype(np.float32), gy=gy.astype(np.float32))
+    return out
+
+
+def cmd_fit(a):
+    """Deform the registered seed until its outline lies on the part's side picture (and, with --quarter, its
+    three-quarter picture at the assumed camera): the sculpting an artist does by eye, done by the picture."""
+    job = Job(a.job)
+    part = _part(_plan(job), a.part)
+    d = job.path("parts", part["name"])
+    blend = os.path.join(d, "registered.blend")
+    if not os.path.exists(blend):
+        sys.exit("no registered mesh for %s: mesh it first" % part["name"])
+    views = []
+    side = _mask_npz(os.path.join(d, "side.png"), os.path.join(d, "fit_side.npz"))
+    if side:
+        views.append({"name": "side", "npz": side, "yaw": 0.0, "pitch": 0.0, "weight": 1.0})
+    if a.quarter and os.path.exists(os.path.join(d, "quarter.png")):
+        q = _mask_npz(os.path.join(d, "quarter.png"), os.path.join(d, "fit_quarter.npz"))
+        if q:
+            views.append({"name": "quarter", "npz": q, "yaw": 35.0, "pitch": 20.0, "weight": 0.5})
+    if not views:
+        sys.exit("no picture with an object in it to fit to")
+    if not a.no_backup and not os.path.exists(os.path.join(d, "registered_unfitted.blend")):
+        shutil.copy2(blend, os.path.join(d, "registered_unfitted.blend"))
+    out_json = os.path.join(d, "fit_report.json")
+    box_size = [part["box_max"][i] - part["box_min"][i] for i in range(3)]
+    _blender(job, "fit_part.py", {"blend": blend, "views": views, "iters": a.iters, "step": a.step, "out_blend": blend, "box_size": box_size,
+                                  "out_render": os.path.join(d, "seed_render.png"), "out_json": out_json},
+             "fit_%s" % part["name"], timeout=1800)
+    rep = json.load(open(out_json))
+    for name in rep["iou_before"]:
+        print("  %s silhouette overlap %.3f -> %.3f" % (name, rep["iou_before"][name], rep["iou_after"][name]))
+    print("fitted %s: moved up to %.1f mm (mean %.2f); render: %s" % (part["name"], rep["max_move_mm"], rep["mean_move_mm"], os.path.join(d, "seed_render.png")))
+    print("Look at seed_render.png; registered_unfitted.blend is the mesh before (copy it back to undo).")
+
+
+ANCHORS = {"centre": (0, 0, 0), "center": (0, 0, 0), "front": (0.5, 0, 0), "back": (-0.5, 0, 0), "top": (0, 0, 0.5),
+           "bottom": (0, 0, -0.5), "left": (0, 0.5, 0), "right": (0, -0.5, 0)}
+
+
+def _point(text, size):
+    """x,y,z in metres in the part's frame, or an anchor name (front/back/top/bottom/left/right/centre, at the
+    part's box faces), or anchor+dx,dy,dz."""
+    base, delta = text, (0.0, 0.0, 0.0)
+    if "+" in text:
+        base, rest = text.split("+", 1)
+        delta = tuple(float(v) for v in rest.split(","))
+    if base in ANCHORS:
+        p = [ANCHORS[base][i] * size[i] for i in range(3)]
+    else:
+        p = [float(v) for v in base.split(",")]
+    return [p[i] + delta[i] for i in range(3)]
+
+
+def cmd_brush(a):
+    """One brush stroke on the registered mesh, headless: the fix the agent can name after looking at the views.
+    Strokes are logged in brush_log.json and replay with --replay after a re-mesh."""
+    job = Job(a.job)
+    part = _part(_plan(job), a.part)
+    d = job.path("parts", part["name"])
+    blend = os.path.join(d, "registered.blend")
+    if not os.path.exists(blend):
+        sys.exit("no registered mesh for %s: mesh it first" % part["name"])
+    log_path = os.path.join(d, "brush_log.json")
+    log = json.load(open(log_path)) if os.path.exists(log_path) else []
+    imported = json.load(open(os.path.join(d, "import.json"))) if os.path.exists(os.path.join(d, "import.json")) else None
+    size = (imported or {}).get("size_m") or [part["box_max"][i] - part["box_min"][i] for i in range(3)]
+    if a.replay:
+        strokes = log
+        if not strokes:
+            sys.exit("nothing to replay")
+    else:
+        if not a.op:
+            sys.exit("--op is required (one of inflate, move, smooth, flatten, crease)")
+        op = {"op": a.op, "at": _point(a.at, size), "radius": a.radius / 1000.0, "strength": a.strength}
+        if a.op == "inflate":
+            op["strength"] = a.strength / 1000.0                  # mm at the centre
+        if a.op == "move":
+            op["delta"] = [float(v) / 1000.0 for v in (a.delta or "0,0,0").split(",")]
+        if a.op == "crease":
+            op["to"] = _point(a.to or a.at, size)
+        if a.op == "flatten" and a.normal:
+            op["normal"] = [float(v) for v in a.normal.split(",")]
+        strokes = [op]
+    if not os.path.exists(os.path.join(d, "registered_unbrushed.blend")):
+        shutil.copy2(blend, os.path.join(d, "registered_unbrushed.blend"))
+    res_path = os.path.join(d, "brush_report.json")
+    box_size = [part["box_max"][i] - part["box_min"][i] for i in range(3)]
+    _blender(job, "brush.py", {"blend": blend, "strokes": strokes, "out_blend": blend, "box_size": box_size,
+                               "out_render": os.path.join(d, "seed_render.png"), "out_json": res_path}, "brush_%s" % part["name"])
+    rep = json.load(open(res_path))
+    if not a.replay:
+        log.extend(strokes)
+        json.dump(log, open(log_path, "w"), indent=1)
+    print("brushed %s: %d stroke(s) moved %d of %d vertices, up to %.2f mm; render: %s" % (
+        part["name"], rep["strokes"], rep["vertices_moved"], rep["vertices"], rep["max_move_mm"], os.path.join(d, "seed_render.png")))
+    print("Log: %s (%d strokes). registered_unbrushed.blend is the mesh before the first stroke." % (log_path, len(log)))
+
+
+def cmd_sdf(a):
+    """An exact part from a signed distance function: parts/<Part>/sdf.py defines `part(kit, L, W, H)` (see
+    mastersmith/sdfkit.py); meshed inside the part's box, imported as registered.blend with the planned material."""
+    from . import sdfkit
+    job = Job(a.job)
+    plan = _plan(job)
+    part = _part(plan, a.part)
+    d = job.path("parts", part["name"])
+    os.makedirs(d, exist_ok=True)
+    src = a.script if a.script and os.path.exists(a.script) else os.path.join(d, "sdf.py")
+    if not os.path.exists(src):
+        sys.exit("no script: write %s with `def part(kit, L, W, H)` returning a kit shape (see mastersmith/sdfkit.py)" % src)
+    L, W, H = [part["box_max"][i] - part["box_min"][i] for i in range(3)]
+    shape = sdfkit.run_part_script(open(src, encoding="utf-8").read(), L, W, H)
+    voxel = (a.voxel / 1000.0) if a.voxel else min(max(max(L, W, H) / 320.0, 0.00015), 0.001)
+    half = [L / 2, W / 2, H / 2]
+    verts, faces = sdfkit.mesh(shape, [-h for h in half], half, voxel)
+    glb = os.path.join(d, "seed.glb")
+    sdfkit.write_glb(verts, faces, glb)
+    print("sdf mesh: %d tris at %.2f mm voxels -> %s" % (len(faces), voxel * 1000, glb))
+    _blender(job, "import_part.py", {"glb": glb, "material": part["material"], "name": part["name"],
+                                     "out_blend": os.path.join(d, "registered.blend"),
+                                     "out_render": os.path.join(d, "seed_render.png"), "out_json": os.path.join(d, "import.json")},
+             "import_%s" % part["name"])
+    rep = json.load(open(os.path.join(d, "import.json")))
+    json.dump({"keep_depth": False}, open(os.path.join(d, "fit.json"), "w"))
+    if os.path.abspath(src) != os.path.abspath(os.path.join(d, "sdf.py")):
+        shutil.copy2(src, os.path.join(d, "sdf.py"))
+    for p in plan["parts"]:
+        if p["name"] == part["name"]:
+            p["method"] = "sdf"
+    plan_out = {k: v for k, v in plan.items() if k not in ("side", "front")}
+    json.dump(plan_out, open(job.path("plan", "plan.json"), "w"), indent=1)
+    print("imported: %d tris, %s mm (box %s mm); render: %s" % (rep["triangles"], [round(v * 1000, 1) for v in rep["size_m"]],
+                                                                [round(v * 1000) for v in (L, W, H)], os.path.join(d, "seed_render.png")))
+    print("Look at seed_render.png next to side.png; edit sdf.py and run again if it is off.")
+
+
 def cmd_assemble(a):
     job = Job(a.job)
     plan = _plan(job)
@@ -271,6 +488,14 @@ def cmd_assemble(a):
         if want and p["name"].lower() not in want:
             continue
         d = job.path("parts", p["name"])
+        if p.get("method") == "code":
+            blend = os.path.join(d, p["name"] + ".blend")
+            if not os.path.exists(blend):
+                print("  %s: not built yet (ms build), left out" % p["name"])
+                continue
+            parts.append({"name": p["name"], "kind": "code", "box_min": p["box_min"], "box_max": p["box_max"], "material": p["material"],
+                          "centreline": bool(p.get("centreline")), "zones": [], "blend": blend, "yaw": 0})
+            continue
         blend = os.path.join(d, "registered.blend")
         if not os.path.exists(blend):
             print("  %s: not meshed yet, left out" % p["name"])
@@ -410,6 +635,9 @@ def cmd_status(a):
     job = Job(a.job)
     print("brief:", job.spec.name, job.spec.category, "%.3f m" % job.spec.size_m)
     print("ref:", sorted(os.listdir(job.path("ref"))) if os.path.isdir(job.path("ref")) else "none")
+    have = [f for f in existing_pictures(job.dir) if f.startswith("parts")]
+    if have:
+        print("part pictures/builders on disk (%d): reuse them; ask the owner before drawing any again" % len(have))
     if os.path.exists(job.path("plan", "plan.json")):
         plan = _plan(job)
         for p in plan["parts"]:
@@ -426,25 +654,38 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="ms", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("new"); s.add_argument("name"); s.add_argument("--category", default="prop"); s.add_argument("--size", type=float, required=True)
+    s.add_argument("--rebrief", action="store_true", help="rewrite brief.json of an existing job (its pictures are kept)")
     s.add_argument("--description", required=True); s.add_argument("--style", default="realistic"); s.add_argument("--engine", default="unreal")
     s.add_argument("--tris", type=int, default=0); s.set_defaults(fn=cmd_new)
     s = sub.add_parser("picture"); s.add_argument("job"); s.add_argument("--out", required=True); s.add_argument("--prompt", required=True)
-    s.add_argument("--ref", action="append"); s.add_argument("--model", default="nano"); s.add_argument("--aspect", default="4:3"); s.set_defaults(fn=cmd_picture)
+    s.add_argument("--ref", action="append"); s.add_argument("--model", default="nano"); s.add_argument("--aspect", default="4:3")
+    s.add_argument("--redraw", action="store_true", help="draw over an existing picture (ask the owner first)"); s.set_defaults(fn=cmd_picture)
     s = sub.add_parser("view"); s.add_argument("job"); s.add_argument("--which", choices=sorted(VIEW_TEXT), required=True)
     s.add_argument("--from", dest="src", required=True); s.add_argument("--out"); s.add_argument("--fixes"); s.add_argument("--mirror", action="store_true")
-    s.add_argument("--model", default="nano"); s.set_defaults(fn=cmd_view)
+    s.add_argument("--model", default="nano"); s.add_argument("--redraw", action="store_true"); s.set_defaults(fn=cmd_view)
     s = sub.add_parser("grid"); s.add_argument("job"); s.add_argument("--side", required=True); s.add_argument("--front")
     s.add_argument("--mirror", action="store_true", help="the side picture has the forward end on the left"); s.add_argument("--width", type=float); s.set_defaults(fn=cmd_grid)
     s = sub.add_parser("plan"); s.add_argument("job"); s.add_argument("plan"); s.set_defaults(fn=cmd_plan)
+    s = sub.add_parser("build"); s.add_argument("job"); s.add_argument("part"); s.set_defaults(fn=cmd_build)
     s = sub.add_parser("part-pictures"); s.add_argument("job"); s.add_argument("part"); s.add_argument("--fixes"); s.add_argument("--erased", action="store_true")
     s.add_argument("--drawn", action="store_true", help="draw the body alone instead of erasing the approved picture")
     s.add_argument("--no-quarter", action="store_true"); s.add_argument("--no-side", action="store_true", help="keep the side picture")
     s.add_argument("--no-front", action="store_true", help="three-quarter picture without the front-view reference")
-    s.add_argument("--model", default="nano"); s.set_defaults(fn=cmd_part_pictures)
+    s.add_argument("--model", default="nano"); s.add_argument("--redraw", action="store_true", help="draw over existing pictures (ask the owner first)")
+    s.set_defaults(fn=cmd_part_pictures)
     s = sub.add_parser("mesh"); s.add_argument("job"); s.add_argument("part"); s.add_argument("--vendor", default="local")
     s.add_argument("--from", dest="src", default="quarter", choices=("quarter", "side")); s.set_defaults(fn=cmd_mesh)
     s = sub.add_parser("register"); s.add_argument("job"); s.add_argument("part"); s.add_argument("--from", dest="src", default="quarter", choices=("quarter", "side"))
     s.add_argument("--yaw", type=float, default=0.0); s.add_argument("--pitch", type=float, default=0.0); s.set_defaults(fn=cmd_register)
+    s = sub.add_parser("fit"); s.add_argument("job"); s.add_argument("part"); s.add_argument("--quarter", action="store_true")
+    s.add_argument("--iters", type=int, default=8); s.add_argument("--step", type=float, default=0.6); s.add_argument("--no-backup", action="store_true"); s.set_defaults(fn=cmd_fit)
+    s = sub.add_parser("brush"); s.add_argument("job"); s.add_argument("part"); s.add_argument("--op", choices=("inflate", "move", "smooth", "flatten", "crease"))
+    s.add_argument("--at", default="centre", help="x,y,z metres in the part frame, or front/back/top/bottom/left/right/centre[+dx,dy,dz]")
+    s.add_argument("--radius", type=float, default=10.0, help="mm"); s.add_argument("--strength", type=float, default=1.0, help="inflate: mm at the centre; others: 0-1")
+    s.add_argument("--delta", help="move: dx,dy,dz in mm"); s.add_argument("--to", help="crease: the line's other end"); s.add_argument("--normal", help="flatten: nx,ny,nz")
+    s.add_argument("--replay", action="store_true", help="re-apply brush_log.json to a fresh mesh"); s.set_defaults(fn=cmd_brush)
+    s = sub.add_parser("sdf"); s.add_argument("job"); s.add_argument("part"); s.add_argument("script", nargs="?"); s.add_argument("--voxel", type=float, help="mm")
+    s.set_defaults(fn=cmd_sdf)
     s = sub.add_parser("assemble"); s.add_argument("job"); s.add_argument("--parts"); s.add_argument("--no-sharpen", action="store_true"); s.set_defaults(fn=cmd_assemble)
     s = sub.add_parser("sheet"); s.add_argument("glb"); s.add_argument("--out"); s.set_defaults(fn=cmd_sheet)
     s = sub.add_parser("preview"); s.add_argument("job"); s.add_argument("--no-open", action="store_true"); s.set_defaults(fn=cmd_preview)

@@ -65,7 +65,9 @@ the previews and the six orthographic views the review is judged on.
 ```
 AGENTS.md                  the rules any coding agent follows here; CLAUDE.md imports it
 .claude/skills/build/      the build recipe (/build in Claude Code)
-mastersmith/ms.py          the tools: new, picture, view, grid, plan, part-pictures, mesh, register, assemble, sheet, preview, package, status
+mastersmith/ms.py          the tools: new, picture, view, grid, plan, part-pictures, mesh, register, fit, brush, sdf, assemble, sheet, preview, package, status
+mastersmith/sculpt.py      headless sculpting in numpy: brushes (inflate, move, smooth, flatten, crease) and silhouette fitting
+mastersmith/sdfkit.py      exact parts as signed distance functions (primitives, CSG, smooth blends, repeat) meshed by marching cubes
 mastersmith/config.py      keys, paths, model routing
 mastersmith/pricing.py     price table (an unpriced endpoint is refused)
 mastersmith/fal.py         fal queue client; local/ ids route to this PC

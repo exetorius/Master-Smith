@@ -342,7 +342,9 @@ def validate_plan(raw, dims, max_parts=None):
             continue
         method = str(p.get("method") or "code").lower()
         part = {"name": name, "what": str(p.get("what") or name)[:400],
-                "method": "vendor" if config.ALL_VENDOR else (method if method in ("code", "vendor") else "code"),
+                # 2026-09-28: an explicit "code" is kept under all-vendor too - the hybrid build codes the machined parts
+                # (rails, sights, trigger, barrel) and meshes only the sculpted ones (receiver, grip, handguard)
+                "method": method if method in ("code", "vendor") else ("vendor" if config.ALL_VENDOR else "code"),
                 "side_box": [pct(v) for v in p["side_box"]], "front_span": [pct(v) for v in p["front_span"]],
                 "box_min": box_min, "box_max": box_max, "material": clean_material(p.get("material"))}
         if part["method"] == "vendor":

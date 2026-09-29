@@ -229,3 +229,67 @@ def camera_from_record(rec, name="ProbeCam"):
     from mathutils import Matrix
     cam.matrix_world = Matrix(rec["matrix_world"])
     return cam
+
+
+def hex_rgb(h):
+    """#rrggbb -> linear RGB, floored at the darkest real paint (a black read off a shadowed photo is darker than any albedo)."""
+    h = str(h or "").lstrip("#")
+    if len(h) != 6:
+        return (0.5, 0.5, 0.5)
+    lin = []
+    for i in (0, 2, 4):
+        c = max(int(h[i:i + 2], 16) / 255.0, 45 / 255.0)
+        lin.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
+    return tuple(lin)
+
+
+def plan_material(name, spec):
+    """The planned colour, metal and roughness as a procedural material with the variation a real surface has
+    (roughness noise, faint colour noise, worn lighter edges on metal by pointiness): what build_part.py gives code
+    parts, for an SDF part (import_part.py) too."""
+    spec = spec or {}
+    mat = bpy.data.materials.new("MI_part_%s" % name)
+    nt = mat.node_tree
+    bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
+    base = hex_rgb(spec.get("color"))
+    rough = float(spec.get("roughness", 0.6))
+    metal = bool(spec.get("metal"))
+    finish = spec.get("finish") or ("metal" if metal else "polymer")
+    if metal:
+        lum = 0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2]
+        if lum < 0.07:
+            base = tuple(min(1.0, c * 0.07 / max(lum, 1e-4)) for c in base)
+        rough = min(rough, 0.4)
+    elif finish == "rubber":
+        rough = max(rough, 0.85)
+    bsdf.inputs["Metallic"].default_value = 1.0 if metal else 0.0
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    noise = nt.nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 180.0
+    noise.inputs["Detail"].default_value = 6.0
+    nt.links.new(coord.outputs["Object"], noise.inputs["Vector"])
+    r_map = nt.nodes.new("ShaderNodeMapRange")
+    r_map.inputs["To Min"].default_value = max(0.05, rough - 0.07)
+    r_map.inputs["To Max"].default_value = min(1.0, rough + 0.07)
+    nt.links.new(noise.outputs["Fac"], r_map.inputs["Value"])
+    nt.links.new(r_map.outputs["Result"], bsdf.inputs["Roughness"])
+    c_mix = nt.nodes.new("ShaderNodeMix")
+    c_mix.data_type = "RGBA"
+    c_mix.inputs["A"].default_value = (*[c * 0.96 for c in base], 1.0)
+    c_mix.inputs["B"].default_value = (*[min(1.0, c * 1.04) for c in base], 1.0)
+    nt.links.new(noise.outputs["Fac"], c_mix.inputs["Factor"])
+    colour = c_mix.outputs["Result"]
+    if metal:
+        geo = nt.nodes.new("ShaderNodeNewGeometry")
+        edge = nt.nodes.new("ShaderNodeMapRange")
+        edge.inputs["From Min"].default_value = 0.52
+        edge.inputs["From Max"].default_value = 0.62
+        nt.links.new(geo.outputs["Pointiness"], edge.inputs["Value"])
+        wear = nt.nodes.new("ShaderNodeMix")
+        wear.data_type = "RGBA"
+        nt.links.new(edge.outputs["Result"], wear.inputs["Factor"])
+        nt.links.new(colour, wear.inputs["A"])
+        wear.inputs["B"].default_value = (*[min(1.0, c * 1.6 + 0.04) for c in base], 1.0)
+        colour = wear.outputs["Result"]
+    nt.links.new(colour, bsdf.inputs["Base Color"])
+    return mat
