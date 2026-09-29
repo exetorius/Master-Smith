@@ -107,6 +107,9 @@ defects named by view. Do not call it good under 7 without saying why.
 The delivery message always carries, in this order: the preview URL (from a `preview` run started after the last
 assemble), the GLB path, the zip path, the score /10 with the defects by view, and what was spent.
 
+A batch of builds: after each asset's review write `delivery/scorecard.json` (`{"score": 8, "spent": "$0.92", "defects": [...]}`),
+then `$PY results out/A out/B ...` serves all of them on one page with links to every preview; give the owner that URL.
+
 ## Re-meshing kept parts later
 The pictures in `parts/<Part>/` are the asset's source. `$PY mesh out/<Name> <Part> --vendor hitem3d3` (or a new
 local model once wired into `mastersmith/local.py`) then `$PY assemble out/<Name>` rebuilds with the new mesh.

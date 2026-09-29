@@ -92,7 +92,9 @@ object's full width, centred parts symmetric about 50.
  "notes": "anything the assembly must respect"}
 ```
 `zones` are areas of a part in a different material (rubber pad on a polymer stock, glass lens on a scope). `metal`
-is true only for bare metal. `"reference_detail": false` on a code part skips projecting the reference picture's
+is true only for bare metal. A dark metal is lifted to 7% reflectance by adding grey (`mastersmith/blender/colour.py`), but a tinted colour
+still renders more saturated on large flat faces: give blued or black steel a near-neutral colour (the shotgun's #283446 came out navy,
+2026-09-29). `"reference_detail": false` on a code part skips projecting the reference picture's
 surface detail onto it (for a part whose coded shape is not the drawn one: folding sights, 2026-09-28). A rifle is 10-16 parts, a pistol 6-10, a truck 12-20, an aircraft 8-14.
 
 ## Commands (`python -m mastersmith.ms ...`)
@@ -114,6 +116,7 @@ surface detail onto it (for a part whose coded shape is not the drawn one: foldi
 | `assemble <job> [--parts A,B] [--no-sharpen]` | fits, tints, bakes, LODs, previews, six views |
 | `sheet <file.glb>` | six views of any GLB |
 | `refs [<job> ...] [--no-open]` | serves the reference pictures of the listed jobs (all jobs when none) on one local page with Approve / Redraw and a note per picture; the owner's choices land in `ref/review.json` (`ms status` prints them). Drafts moved to `ref/unused/` are not shown; `ref/notes.txt` is shown above a job's pictures |
+| `results [<job> ...] [--no-open]` | every delivered job (or the listed ones) on one local page: six views, score and defects from `delivery/scorecard.json` (`{"score", "spent", "tonetta", "defects"}`, written by the agent after its review), cost, links to each job's 3D preview, GLB and zip, all from one port |
 | `preview <job> [--no-open]` | serves `delivery/preview.html` (3D viewer, six views, every part's pictures beside its seed) and opens it |
 | `package <job>` | README, manifest, zip in delivery/ |
 | `status <job>` | what the job has so far |

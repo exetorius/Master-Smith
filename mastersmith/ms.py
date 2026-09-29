@@ -24,6 +24,7 @@ deterministic thing and writes into a job folder under out/<Name>/:
     python -m mastersmith.ms sheet path/to/any.glb [--out sheet.png]
     python -m mastersmith.ms refs out/BullpupCarbine out/Other [--no-open]  (reference pictures to approve, ref/review.json)
     python -m mastersmith.ms preview out/BullpupCarbine [--no-open]   (delivery/preview.html served and opened)
+    python -m mastersmith.ms results [out/A out/B] [--no-open]     (every delivered job on one page, links to each preview)
     python -m mastersmith.ms package out/BullpupCarbine
     python -m mastersmith.ms status out/BullpupCarbine
 """
@@ -39,7 +40,7 @@ import webbrowser
 
 from PIL import Image, ImageOps
 
-from . import config, pricing, refs_review
+from . import config, pricing, refs_review, results_page
 from .fal import Fal, first_url
 from .images import Images
 from .spec import Spec
@@ -691,17 +692,38 @@ def cmd_refs(a):
         if not os.path.isfile(os.path.join(out_dir, j, "brief.json")):
             sys.exit("no job %s in %s" % (j, out_dir))
     page = refs_review.write_page(out_dir, jobs)
+    url = _serve_out(out_dir) + "/refs.html"
+    print("reference review: %s  (%s, %d jobs)" % (url, page, len(jobs)))
+    print("choices land in out/<Name>/ref/review.json; read them before building")
+    if not a.no_open:
+        webbrowser.open(url)
+
+
+def cmd_results(a):
+    """Every delivered job on one local page: six views, score and defects (delivery/scorecard.json), cost, and links
+    to its 3D preview, GLB and zip (2026-09-29: the owner reviews a batch of builds from one page)."""
+    out_dir = str(config.OUT_DIR)
+    jobs = [os.path.basename(os.path.normpath(j)) for j in a.jobs] or results_page.delivered_jobs(out_dir)
+    for j in jobs:
+        if not os.path.isfile(os.path.join(out_dir, j, "delivery", "report.json")):
+            sys.exit("nothing assembled yet in %s" % j)
+    page = results_page.write_results(out_dir, jobs)
+    url = _serve_out(out_dir) + "/results.html"
+    print("results: %s  (%s, %d jobs)" % (url, page, len(jobs)))
+    if not a.no_open:
+        webbrowser.open(url)
+
+
+def _serve_out(out_dir):
+    """The out/ folder on a free local port, left running in the background (refs_review.py: static files plus the
+    reference-review writes); every job's preview.html opens from it too. Returns the base URL."""
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
     subprocess.Popen([sys.executable, "-m", "mastersmith.refs_review", out_dir, str(port)], cwd=str(config.ROOT),
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
-    url = "http://127.0.0.1:%d/refs.html" % port
-    print("reference review: %s  (%s, %d jobs)" % (url, page, len(jobs)))
-    print("choices land in out/<Name>/ref/review.json; read them before building")
-    if not a.no_open:
-        webbrowser.open(url)
+    return "http://127.0.0.1:%d" % port
 
 
 def cmd_sheet(a):
@@ -792,6 +814,7 @@ def main(argv=None):
     s.add_argument("--no-materials", action="store_true", help="skip the CC0 smart-material pass (#15), for comparison"); s.set_defaults(fn=cmd_assemble)
     s = sub.add_parser("sheet"); s.add_argument("glb"); s.add_argument("--out"); s.set_defaults(fn=cmd_sheet)
     s = sub.add_parser("refs"); s.add_argument("jobs", nargs="*"); s.add_argument("--no-open", action="store_true"); s.set_defaults(fn=cmd_refs)
+    s = sub.add_parser("results"); s.add_argument("jobs", nargs="*"); s.add_argument("--no-open", action="store_true"); s.set_defaults(fn=cmd_results)
     s = sub.add_parser("preview"); s.add_argument("job"); s.add_argument("--no-open", action="store_true"); s.set_defaults(fn=cmd_preview)
     s = sub.add_parser("package"); s.add_argument("job"); s.set_defaults(fn=cmd_package)
     s = sub.add_parser("status"); s.add_argument("job"); s.set_defaults(fn=cmd_status)
