@@ -231,16 +231,10 @@ def camera_from_record(rec, name="ProbeCam"):
     return cam
 
 
-def hex_rgb(h):
-    """#rrggbb -> linear RGB, floored at the darkest real paint (a black read off a shadowed photo is darker than any albedo)."""
-    h = str(h or "").lstrip("#")
-    if len(h) != 6:
-        return (0.5, 0.5, 0.5)
-    lin = []
-    for i in (0, 2, 4):
-        c = max(int(h[i:i + 2], 16) / 255.0, 45 / 255.0)
-        lin.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
-    return tuple(lin)
+def hex_rgb(h, metal=False):
+    """#rrggbb -> linear RGB as colour.py makes it for every part (floored; a dark metal lifted to its reflectance)."""
+    from colour import planned_linear
+    return planned_linear(h, metal) or (0.5, 0.5, 0.5)
 
 
 def plan_material(name, spec):
@@ -251,14 +245,11 @@ def plan_material(name, spec):
     mat = bpy.data.materials.new("MI_part_%s" % name)
     nt = mat.node_tree
     bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
-    base = hex_rgb(spec.get("color"))
     rough = float(spec.get("roughness", 0.6))
     metal = bool(spec.get("metal"))
+    base = hex_rgb(spec.get("color"), metal)
     finish = spec.get("finish") or ("metal" if metal else "polymer")
     if metal:
-        lum = 0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2]
-        if lum < 0.07:
-            base = tuple(min(1.0, c * 0.07 / max(lum, 1e-4)) for c in base)
         rough = min(rough, 0.4)
     elif finish == "rubber":
         rough = max(rough, 0.85)

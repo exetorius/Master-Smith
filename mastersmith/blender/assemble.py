@@ -138,7 +138,9 @@ def add_reference_detail(o, det):
             images[view] = img
     if "side" not in images:
         return False
-    for m in (mats if mats is not None else {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}):
+    # the part's own materials: a `mats` here read the script-level loop variable of the zone pass, so assembly
+    # crashed on a job with no zoned vendor part and put the detail on another part's zone otherwise (2026-09-29)
+    for m in {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}:
         t = m.node_tree
         b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
         if b is None:
@@ -196,26 +198,8 @@ def add_reference_detail(o, det):
     return True
 
 
-def planned_linear(h, metal=False):
-    """The plan's colour (#rrggbb) in linear RGB with the same albedo floor the code parts use (sRGB 45). A metal's
-    base colour is how much it reflects: blued or black steel still reflects about a fifth of the light, so a metal is
-    lifted to that luminance, keeping its hue - near-black "black steel" rendered as dull graphite (2026-09-28)."""
-    h = str(h or "").lstrip("#")
-    if len(h) != 6:
-        return None
-    out = []
-    for i in (0, 2, 4):
-        c = max(int(h[i:i + 2], 16) / 255.0, 45 / 255.0)
-        out.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)
-    if metal:
-        lum = 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]
-        if lum < METAL_MIN_REFLECTANCE:
-            k = METAL_MIN_REFLECTANCE / max(lum, 1e-4)
-            out = [min(1.0, v * k) for v in out]
-    return tuple(out)
-
-
-METAL_MIN_REFLECTANCE = 0.07       # blued or black steel: clearly metal, still dark (0.12 read as silver on a pistol slide)
+# the plan's colour in linear RGB, floored, a dark metal lifted to its reflectance: shared with build_part.py, tested
+from colour import METAL_MIN_REFLECTANCE, planned_linear  # noqa: E402,F401
 
 
 def image_mean_luminance(img):

@@ -17,6 +17,7 @@ from mathutils import Matrix, Vector
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blib  # noqa: E402
 import codecheck  # noqa: E402
+from colour import planned_linear  # noqa: E402
 from hskit import Kit, KitError  # noqa: E402
 
 args = json.load(open(sys.argv[sys.argv.index("--") + 1]))
@@ -32,16 +33,9 @@ def write_result():
         json.dump(result, f, indent=1)
 
 
-def hex_rgb(h):
-    h = str(h or "").lstrip("#")
-    if len(h) != 6:
-        return (0.5, 0.5, 0.5)
-    lin = []
-    for i in (0, 2, 4):
-        c = int(h[i:i + 2], 16) / 255.0
-        c = max(c, 45 / 255.0)     # the darkest real paint or polymer; a black read off a shadowed photo is darker than
-        lin.append(c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4)   # any albedo (the pistol, 2026-09-27)
-    return tuple(lin)
+def hex_rgb(h, metal=False):
+    """The plan colour in linear RGB, the same as the assembler's (colour.py); mid grey for a malformed one."""
+    return planned_linear(h, metal) or (0.5, 0.5, 0.5)
 
 
 def make_material(spec):
@@ -52,15 +46,11 @@ def make_material(spec):
     mat = bpy.data.materials.new("MI_part_%s" % NAME)
     nt = mat.node_tree
     bsdf = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
-    base = hex_rgb(spec.get("color"))
     rough = float(spec.get("roughness", 0.6))
     metal = bool(spec.get("metal"))
+    base = hex_rgb(spec.get("color"), metal)   # a metal's base colour is its reflectance, lifted in colour.py
     finish = spec.get("finish") or ("metal" if metal else "polymer")
     if metal:
-        # a metal's base colour is its reflectance: black steel still reflects about a fifth of the light
-        lum = 0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2]
-        if lum < 0.07:                              # blued or black steel: clearly metal, still dark
-            base = tuple(min(1.0, c * 0.07 / max(lum, 1e-4)) for c in base)
         rough = min(rough, 0.4)
     elif finish == "rubber":
         rough = max(rough, 0.85)
