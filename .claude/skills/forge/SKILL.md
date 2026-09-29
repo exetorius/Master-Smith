@@ -83,6 +83,10 @@ Read `preview_views.png` and every `preview_*.png` yourself. Check, in this orde
 2. Proportions against the side picture: each part in its box, the magazine not fat, the barrel not thin.
 3. Materials: steel is dark and reflective, rubber matt, glass glassy, polymer satin; colours match the picture.
 4. Edges crisp, muzzle round, no blobs.
+5. Surfaces opaque and one colour per material: a slot or panel line showing on BOTH sides, the picture's
+   white background as pale patches on a magazine or grip, or a see-through look means the picture projection
+   (#14) misfired on that job; `assemble --no-projection` keeps the smart materials and drops it (the bullpup,
+   2026-09-29: its body picture carries the grip, and the far side gets the picture mirrored).
 A wrong outline is fixed on the mesh: `$PY fit out/<Name> <Part>` sculpts the seed onto its side picture; a
 local fault you can name, `$PY brush out/<Name> <Part> --op ...`; a part that is pure geometry (barrel, muzzle
 device, rail, sight), `$PY sdf out/<Name> <Part>` from a `sdf.py` you write (AGENTS.md, "Sculpting without a
