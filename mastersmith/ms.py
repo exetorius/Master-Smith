@@ -478,6 +478,65 @@ def cmd_sdf(a):
     print("Look at seed_render.png next to side.png; edit sdf.py and run again if it is off.")
 
 
+def _proj_picture(src, dst, crop=True):
+    """A picture as the projection wants it: cropped to its object (unless it already is), its alpha the object's
+    mask (holes filled, a pixel eroded so the white fringe never lands on the mesh). -> (dst, (w, h)) or None"""
+    import numpy as np
+    from scipy import ndimage
+    a = np.asarray(Image.open(src).convert("RGB")).astype(np.float32) / 255.0
+    border = np.concatenate([a[:6].reshape(-1, 3), a[-6:].reshape(-1, 3), a[:, :6].reshape(-1, 3), a[:, -6:].reshape(-1, 3)])
+    fg = np.abs(a - np.median(border, axis=0)).max(axis=2) > 0.1
+    if fg.mean() < 0.005:
+        return None
+    fg = ndimage.binary_fill_holes(fg)
+    if crop:
+        ys, xs = np.nonzero(fg)
+        y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+        a, fg = a[y0:y1, x0:x1], fg[y0:y1, x0:x1]
+    fg = ndimage.binary_erosion(fg, iterations=max(1, min(a.shape[:2]) // 400))
+    # a product shot is lit: its shadowed lower half projected as a dark blotch on the part (2026-09-28). The
+    # low-frequency luminance is flattened towards the object's mean (half strength, so a real dark panel stays
+    # darker than a light one); hue, colour breaks and fine detail are untouched.
+    lum = a @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    sigma = max(a.shape[:2]) * 0.08
+    m = fg.astype(np.float32)
+    low = ndimage.gaussian_filter(lum * m, sigma) / np.maximum(ndimage.gaussian_filter(m, sigma), 1e-3)
+    mean = float(lum[fg].mean()) if fg.any() else 0.5
+    gain = np.clip((mean / np.maximum(low, 1e-3)) ** 0.5, 0.6, 1.6)
+    a = np.clip(a * gain[:, :, None], 0, 1)
+    rgba = np.dstack([a, fg.astype(np.float32)])
+    Image.fromarray((rgba * 255).astype("uint8"), "RGBA").save(dst)
+    return dst, (a.shape[1], a.shape[0])
+
+
+def _projection_inputs(job, plan, parts):
+    """What assemble.py projects (#14): the approved side and front views for every part (with their high-pass
+    detail maps), and each part's own side picture when it has one, in its own frame - or the asset's frame when
+    it is the erased body picture (same size as the plan's side view)."""
+    side_size = Image.open(plan["side"]).size
+    out = {"strength": 0.85}
+    ps = _proj_picture(plan["side"], job.path("plan", "proj_side.png"), crop=False)
+    if ps:
+        out["side"] = ps[0]
+        out["side_detail"] = detail_map(plan["side"], job.path("plan", "detail_side.png"))
+    if plan.get("front"):
+        pf = _proj_picture(plan["front"], job.path("plan", "proj_front.png"), crop=False)
+        if pf:
+            out["front"] = pf[0]
+            out["front_detail"] = detail_map(plan["front"], job.path("plan", "detail_front.png"))
+    for entry in parts:
+        d = job.path("parts", entry["name"])
+        side = os.path.join(d, "side.png")
+        if not os.path.exists(side) or (entry.get("material") or {}).get("glass"):
+            continue
+        whole = Image.open(side).size == side_size
+        pp = _proj_picture(side, os.path.join(d, "proj_side.png"), crop=not whole)
+        if pp:
+            entry["projection"] = {"picture": pp[0], "frame": "asset" if whole else "part",
+                                   "detail": detail_map(pp[0], os.path.join(d, "detail_side.png"))}
+    return out
+
+
 def cmd_assemble(a):
     job = Job(a.job)
     plan = _plan(job)
@@ -504,6 +563,7 @@ def cmd_assemble(a):
         fit = json.load(open(os.path.join(d, "fit.json"))) if os.path.exists(os.path.join(d, "fit.json")) else {}
         is_largest = p["name"] == largest["name"]
         parts.append({"name": p["name"], "kind": "vendor", "box_min": p["box_min"], "box_max": p["box_max"], "material": p["material"],
+                      "fitted": os.path.exists(os.path.join(d, "fit_report.json")),
                       "centreline": bool(p.get("centreline")), "zones": p.get("zones") or [], "blend": blend, "yaw": 0,
                       "keep_depth": bool(fit.get("keep_depth")) and is_largest, "fill_box": not is_largest})
     if not parts:
@@ -514,7 +574,17 @@ def cmd_assemble(a):
     if plan.get("front"):
         det["front"] = detail_map(plan["front"], job.path("plan", "detail_front.png"))
     ref = job.path("ref", "ref_0.png")
+    projection = None if a.no_projection else _projection_inputs(job, plan, parts)
+    pbr_library = {}
+    if not a.no_materials:
+        from . import materials
+        pbr_library = materials.library_for(plan["parts"], log=print)      # names each part's and zone's set
+        by_name = {p["name"]: p for p in plan["parts"]}
+        for entry in parts:
+            entry["pbr_set"] = by_name[entry["name"]].get("pbr_set")
+            entry["zones"] = by_name[entry["name"]].get("zones") or []
     args = {"name": job.spec.name, "out_dir": delivery, "tri_budget": job.spec.tri_budget or 100000, "engine": job.spec.engine,
+            "projection": projection, "pbr_library": pbr_library, "length_m": plan["dims_m"][0],
             "atlas_size": 4096 if (job.spec.tri_budget or 0) >= 100000 else 2048, "render_size": 768, "spec": job.spec.to_dict(),
             "reference": ref if os.path.exists(ref) else None, "parts": parts, "detail": det, "sharpen": not a.no_sharpen}
     _blender(job, "assemble.py", args, "assemble")
@@ -687,7 +757,9 @@ def main(argv=None):
     s.add_argument("--replay", action="store_true", help="re-apply brush_log.json to a fresh mesh"); s.set_defaults(fn=cmd_brush)
     s = sub.add_parser("sdf"); s.add_argument("job"); s.add_argument("part"); s.add_argument("script", nargs="?"); s.add_argument("--voxel", type=float, help="mm")
     s.set_defaults(fn=cmd_sdf)
-    s = sub.add_parser("assemble"); s.add_argument("job"); s.add_argument("--parts"); s.add_argument("--no-sharpen", action="store_true"); s.set_defaults(fn=cmd_assemble)
+    s = sub.add_parser("assemble"); s.add_argument("job"); s.add_argument("--parts"); s.add_argument("--no-sharpen", action="store_true")
+    s.add_argument("--no-projection", action="store_true", help="skip the picture projection (#14), for comparison")
+    s.add_argument("--no-materials", action="store_true", help="skip the CC0 smart-material pass (#15), for comparison"); s.set_defaults(fn=cmd_assemble)
     s = sub.add_parser("sheet"); s.add_argument("glb"); s.add_argument("--out"); s.set_defaults(fn=cmd_sheet)
     s = sub.add_parser("preview"); s.add_argument("job"); s.add_argument("--no-open", action="store_true"); s.set_defaults(fn=cmd_preview)
     s = sub.add_parser("package"); s.add_argument("job"); s.set_defaults(fn=cmd_package)

@@ -119,6 +119,17 @@ surface detail onto it (for a part whose coded shape is not the drawn one: foldi
 
 `<job>` is `out/<Name>`. Every command prints where it wrote; Read those files.
 
+## Materials
+
+Two passes in `assemble` make the surfaces (both on by default; `--no-projection`, `--no-materials` to compare):
+- **Picture projection** (#14): each part's own side picture (mirrored for the far side) and the approved front
+  view are projected as base colour where the faces look at them, luminance-flattened so the picture's lighting
+  does not print; the mesher's texture stays where no picture sees.
+- **Smart materials** (#15): a CC0 surface set per finish (`mastersmith/materials.py`, fetched once from ambientCG
+  into `E:/local-models/pbr/`): brushed or parkerised steel, anodised aluminium, black polymer, rubber, powder-coat
+  paint - light/dark variation over the planned colour, real roughness structure, a fine bump, and ambient-occlusion
+  dirt in cavities and at joins. The per-finish rules the plan should follow are in `mastersmith/skills/materials.md`.
+
 ## Sculpting without a mouse
 
 Three tools stand in for an artist's hands; use them after looking, never blind.

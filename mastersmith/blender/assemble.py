@@ -16,7 +16,9 @@ import numpy as np
 from mathutils import Matrix, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import blib  # noqa: E402
+from mastersmith import sculpt  # noqa: E402
 
 args = json.load(open(sys.argv[sys.argv.index("--") + 1]))
 NAME = args["name"]
@@ -383,7 +385,9 @@ def surface_detail(o, mat, strength=1.0, mats=None, vendor=False):
         lighten.blend_type = "SCREEN"
         K.new(wear2.outputs[0], lighten.inputs["Factor"])
         K.new(src, lighten.inputs["A"])
-        lighten.inputs["B"].default_value = (0.50, 0.50, 0.47, 1.0) if metal else (0.26, 0.26, 0.25, 1.0)
+        # worn metal edges: a dull lighter steel, not silver - 0.50 over a crinkly seed's many "edges" read as white
+        # flecks on the muzzle brake and rails (2026-09-28)
+        lighten.inputs["B"].default_value = (0.34, 0.34, 0.32, 1.0) if metal else (0.26, 0.26, 0.25, 1.0)
         grime = N.new("ShaderNodeMix")
         grime.data_type = "RGBA"
         grime.blend_type = "MULTIPLY"
@@ -535,6 +539,119 @@ def glass_zone(mats):
             b.inputs["Specular IOR Level"].default_value = 0.8
 
 
+def smart_material(o, pbr, mats, length_m):
+    """A CC0 surface set (issue #15) layered over whatever the material has: the set's colour supplies only its light
+    and dark variation (the planned colour stays), its roughness varies ours, its displacement drives a fine bump
+    chained onto any normal map, and ambient occlusion puts dirt in the cavities and at the joins. Tri-planar in
+    object space at the set's real-world tile size, so it bakes into the atlas like everything else."""
+    maps, tile = pbr["maps"], float(pbr["tile_m"])
+    done = 0
+    for m in mats:
+        t = m.node_tree
+        b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if b is None or m.get("ms_glass"):
+            continue
+        N, K = t.nodes, t.links
+        coord = N.new("ShaderNodeTexCoord")
+        mapping = N.new("ShaderNodeMapping")
+        mapping.inputs["Scale"].default_value = (1.0 / tile,) * 3
+        K.new(coord.outputs["Object"], mapping.inputs["Vector"])
+
+        def tex(role, colour):
+            img = bpy.data.images.load(os.path.abspath(maps[role]), check_existing=True)
+            img.colorspace_settings.name = "sRGB" if colour else "Non-Color"
+            n = N.new("ShaderNodeTexImage")
+            n.image = img
+            n.projection = "BOX"
+            n.projection_blend = 0.3
+            K.new(mapping.outputs["Vector"], n.inputs["Vector"])
+            return n
+
+        def op(kind, a, c=None, clamp=False):
+            n = N.new("ShaderNodeMath")
+            n.operation = kind
+            n.use_clamp = clamp
+            for i, v in enumerate((a, c)):
+                if v is None:
+                    continue
+                if isinstance(v, (int, float)):
+                    n.inputs[i].default_value = float(v)
+                else:
+                    K.new(v, n.inputs[i])
+            return n.outputs[0]
+        # colour: the set's light-and-dark over the planned colour, damped
+        col = tex("color", True)
+        mean = image_mean_luminance(col.image) or 0.5
+        bw = N.new("ShaderNodeRGBToBW")
+        K.new(col.outputs["Color"], bw.inputs[0])
+        var = N.new("ShaderNodeMapRange")
+        var.clamp = True
+        var.inputs["From Min"].default_value = 0.0
+        var.inputs["From Max"].default_value = 2.0 * mean
+        # a set's own highlights (brushed-steel scratches) over the wear pass's lighter edges read as white flecks on
+        # the muzzle brake and rails (2026-09-28): the variation is damped, most on metal
+        spread = float(pbr.get("colour_var", 0.3))
+        var.inputs["To Min"].default_value = 1.0 - spread
+        var.inputs["To Max"].default_value = 1.0 + spread
+        K.new(bw.outputs[0], var.inputs["Value"])
+        base = b.inputs["Base Color"]
+        if base.is_linked:
+            src = base.links[0].from_socket
+        else:
+            rgb = N.new("ShaderNodeRGB")
+            rgb.outputs[0].default_value = tuple(base.default_value)
+            src = rgb.outputs[0]
+        scale = N.new("ShaderNodeVectorMath")
+        scale.operation = "SCALE"
+        K.new(src, scale.inputs[0])
+        K.new(var.outputs["Result"], scale.inputs["Scale"])
+        # cavity dirt from ambient occlusion: darker and rougher in recesses and at the joins between parts
+        ao = N.new("ShaderNodeAmbientOcclusion")
+        ao.samples = 8
+        ao.inputs["Distance"].default_value = max(0.004, 0.015 * length_m)
+        dirt = N.new("ShaderNodeMapRange")
+        dirt.clamp = True
+        dirt.inputs["From Min"].default_value = 0.92
+        dirt.inputs["From Max"].default_value = 0.5
+        dirt.inputs["To Max"].default_value = float(pbr.get("dirt", 0.3))
+        K.new(ao.outputs["AO"], dirt.inputs["Value"])
+        grime = N.new("ShaderNodeMix")
+        grime.data_type = "RGBA"
+        grime.blend_type = "MULTIPLY"
+        K.new(dirt.outputs["Result"], grime.inputs["Factor"])
+        K.new(scale.outputs["Vector"], grime.inputs["A"])
+        grime.inputs["B"].default_value = (0.42, 0.40, 0.38, 1.0)
+        for l in list(base.links):
+            K.remove(l)
+        K.new(grime.outputs["Result"], base)
+        # roughness: ours, varied by the set's, rougher in the dirt
+        rough = b.inputs["Roughness"]
+        r_src = rough.links[0].from_socket if rough.is_linked else None
+        r_tex = tex("roughness", False)
+        r_var = op("MULTIPLY", op("SUBTRACT", r_tex.outputs["Color"], 0.5), float(pbr.get("rough_var", 0.4)))
+        r_in = r_src if r_src is not None else float(rough.default_value)
+        r_out = op("ADD", op("ADD", r_in, r_var), op("MULTIPLY", dirt.outputs["Result"], 0.3), clamp=True)
+        for l in list(rough.links):
+            K.remove(l)
+        K.new(r_out, rough)
+        # bump from the set's displacement, chained onto whatever normal the material already has
+        if maps.get("displacement"):
+            d_tex = tex("displacement", False)
+            bump = N.new("ShaderNodeBump")
+            bump.inputs["Strength"].default_value = float(pbr.get("bump", 0.3))
+            bump.inputs["Distance"].default_value = 0.0004
+            K.new(d_tex.outputs["Color"], bump.inputs["Height"])
+            nrm = b.inputs["Normal"]
+            if nrm.is_linked:
+                K.new(nrm.links[0].from_socket, bump.inputs["Normal"])
+                for l in list(nrm.links):
+                    if l.to_node is not bump:
+                        K.remove(l)
+            K.new(bump.outputs["Normal"], nrm)
+        done += 1
+    return done
+
+
 def surface_to_plan(o, mat, mats=None):
     """A vendor part takes its planned roughness and metalness too: Tripo's maps made the bullpup's polymer body shine
     like metal (2026-09-27). The texture's roughness variation is kept, squeezed into planned +-0.1."""
@@ -590,12 +707,25 @@ for p in args["parts"]:
             zm = z.get("material") or {}
             if zm.get("glass") or zm.get("finish") == "glass":
                 glass_zone(mats)                   # smooth tinted glass; the wear pass turned a windshield to snow
+                for m in mats:
+                    m["ms_glass"] = True
                 continue
             tint_to_plan(o, zm.get("color"), mats, metal=bool(zm.get("metal")))
             surface_to_plan(o, zm, mats)
             if args.get("surface_detail", True):
                 surface_detail(o, zm, mats=mats, vendor=True)
         rec["zones"] = [z.get("name") for z, _m in zoned]
+    lib = args.get("pbr_library") or {}
+    if lib and not (p.get("material") or {}).get("glass"):
+        length_m = float(args.get("length_m") or 1.0)
+        sets = []
+        if p["kind"] == "vendor" and args.get("tint_vendor", True):
+            sets.append((p.get("pbr_set"), rest))
+            for z, mats in zoned:
+                sets.append((z.get("pbr_set"), mats))
+        else:
+            sets.append((p.get("pbr_set"), {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree}))
+        rec["smart_materials"] = sum(smart_material(o, lib[key], mats, length_m) for key, mats in sets if key in lib and mats)
     for slot in o.material_slots:
         if slot.material:
             slot.material.name = "MS_src_%s_%s" % (p["name"], slot.material.name)
@@ -877,10 +1007,249 @@ def sharp_by_angle(o, degrees=30):
 
 # hard-surface edges back on the vendor seeds before anything is copied, decimated or baked
 if args.get("sharpen", True):
+    fitted = {p["name"] for p in args["parts"] if p.get("fitted")}
     for o, r in parts:
-        if r["kind"] == "vendor":
+        if r["kind"] == "vendor" and r["name"] not in fitted:      # a fitted seed's texture mottled under the flattening
             r["sharpened"] = sharpen_planar(o)
             log("%s: sharpened %s" % (r["name"], r["sharpened"]))
+
+# ---------------------------------------------------------------- photo projection (#14)
+def face_visibility(o, others, direction, eps):
+    """Per face of `o`: 1 when a ray from the face centre towards `direction` (a unit vector, towards the camera) hits
+    nothing, 0 when another part (or the part itself) is in the way: the front picture must not land on a receiver
+    face hidden behind the handguard. -> numpy array over the polygons"""
+    from mathutils.bvhtree import BVHTree
+    me = o.data
+    n = len(me.polygons)
+    centres = np.empty(n * 3, np.float32)
+    me.polygons.foreach_get("center", centres)
+    centres = centres.reshape(-1, 3)
+    normals = np.empty(n * 3, np.float32)
+    me.polygons.foreach_get("normal", normals)
+    normals = normals.reshape(-1, 3)
+    d = Vector(direction)
+    trees = []
+    for q in others:
+        qm = q.data
+        qm.calc_loop_triangles()
+        co = np.empty(len(qm.vertices) * 3, np.float32)
+        qm.vertices.foreach_get("co", co)
+        tri = np.empty(len(qm.loop_triangles) * 3, np.int32)
+        qm.loop_triangles.foreach_get("vertices", tri)
+        trees.append(BVHTree.FromPolygons([Vector(v) for v in co.reshape(-1, 3)], tri.reshape(-1, 3).tolist()))
+    vis = np.ones(n, np.float32)
+    facing = (normals @ np.asarray(direction, np.float32)) > 0.05
+    for i in np.nonzero(facing)[0]:
+        start = Vector(centres[i]) + Vector(normals[i]) * eps + d * eps
+        for t in trees:
+            if t.ray_cast(start, d)[0] is not None:
+                vis[i] = 0.0
+                break
+    # a face counts as seen only when most of its neighbours are too: the binary test checkered a noisy seed
+    fa, fb, degree = face_adjacency(me)
+    for _ in range(2):
+        vis = (np.bincount(fa, weights=vis[fb], minlength=n) / np.maximum(degree, 1.0) > 0.6).astype(np.float32)
+    return vis
+
+
+def face_adjacency(me):
+    """Every pair of faces sharing a vertex (each face with itself too), as (face_a, face_b, degree) arrays."""
+    n = len(me.polygons)
+    loop_total = np.empty(n, np.int64)
+    me.polygons.foreach_get("loop_total", loop_total)
+    loop_vert = np.empty(len(me.loops), np.int64)
+    me.loops.foreach_get("vertex_index", loop_vert)
+    face_of_loop = np.repeat(np.arange(n, dtype=np.int64), loop_total)
+    order = np.argsort(loop_vert, kind="stable")
+    fs = face_of_loop[order]
+    _, start, k = np.unique(loop_vert[order], return_index=True, return_counts=True)
+    k_e = np.repeat(k, k)
+    start_e = np.repeat(start, k)
+    rep = np.repeat(np.arange(len(fs)), k_e)
+    within = np.arange(len(rep)) - np.repeat(np.cumsum(k_e) - k_e, k_e)
+    pairs = np.unique(fs[rep] * n + fs[np.repeat(start_e, k_e) + within])
+    fa, fb = pairs // n, pairs % n
+    return fa, fb, np.bincount(fa, minlength=n).astype(np.float32)
+
+
+def facing_attributes(o, iters=4):
+    """Point attributes ms_face_x / ms_face_y: the vertex normal's X and Y after a few rounds of averaging with the
+    neighbours. The projection blends on these, interpolated across the face, instead of on each facet's own normal:
+    a mesher's surface is bumpy, and per-facet blending checkered the receiver (2026-09-28)."""
+    me = o.data
+    me.calc_loop_triangles()
+    v = np.empty(len(me.vertices) * 3, np.float32)
+    me.vertices.foreach_get("co", v)
+    f = np.empty(len(me.loop_triangles) * 3, np.int32)
+    me.loop_triangles.foreach_get("vertices", f)
+    verts, faces = v.reshape(-1, 3).astype(np.float64), f.reshape(-1, 3).astype(np.int64)
+    n = sculpt.vertex_normals(verts, faces)
+    adj = sculpt.neighbours(faces, len(verts))
+    for _ in range(iters):
+        n = 0.5 * n + 0.5 * sculpt.neighbour_mean(n, adj, len(verts))
+        n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+    for name, col in (("ms_face_x", 0), ("ms_face_y", 1)):
+        attr = me.attributes.get(name) or me.attributes.new(name, "FLOAT", "POINT")
+        attr.data.foreach_set("value", n[:, col].astype(np.float32))
+
+
+def project_pictures(o, p, proj):
+    """Base colour from the pictures (issue #14): the part's own side picture (drawn alone, cropped to the part) on
+    the faces that look sideways - mirrored onto the far side - and the approved front picture on the faces that look
+    forward and are not hidden behind another part. Each is blended by how squarely the face looks at that picture and
+    by the picture's own alpha (its object mask), over whatever colour the material had, so the mesher's texture stays
+    where no picture sees. A high-pass of the picture drives a bump where the material has no normal map yet."""
+    strength = float(proj.get("strength", 0.85))
+    mats = {sl.material for sl in o.material_slots if sl.material and sl.material.node_tree and not sl.material.get("ms_glass")}
+    if not mats:
+        return {}
+    views = []
+    own = p.get("projection") or {}
+    if own.get("picture") and os.path.exists(own["picture"]):
+        if own.get("frame") == "asset":
+            fr = proj["asset_frame"]
+        else:
+            lo, hi = blib.dims(o)
+            fr = [(lo.x + hi.x) / 2, (lo.z + hi.z) / 2, max(hi.x - lo.x, 1e-6), max(hi.z - lo.z, 1e-6)]
+        views.append(("side", own["picture"], own.get("detail"), fr, None))
+    elif proj.get("side") and os.path.exists(proj["side"]):
+        views.append(("side", proj["side"], proj.get("side_detail"), proj["asset_frame"], "ms_vis_side"))
+    if proj.get("front") and os.path.exists(proj["front"]) and p.get("front_part"):
+        views.append(("front", proj["front"], proj.get("front_detail"), proj["asset_frame_front"], "ms_vis_front"))
+    if not views:
+        return {}
+    done = []
+    for m in mats:
+        t = m.node_tree
+        b = next((n for n in t.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if b is None:
+            continue
+        N, K = t.nodes, t.links
+
+        def op(kind, a, c=None):
+            n = N.new("ShaderNodeMath")
+            n.operation = kind
+            for i, v in enumerate((a, c)):
+                if v is None:
+                    continue
+                if isinstance(v, (int, float)):
+                    n.inputs[i].default_value = float(v)
+                else:
+                    K.new(v, n.inputs[i])
+            return n.outputs[0]
+
+        def facing(sock, lo_=0.35, hi_=0.7):
+            mr = N.new("ShaderNodeMapRange")
+            mr.interpolation_type = "SMOOTHSTEP"
+            mr.clamp = True
+            mr.inputs["From Min"].default_value = lo_
+            mr.inputs["From Max"].default_value = hi_
+            K.new(sock, mr.inputs["Value"])
+            return mr.outputs["Result"]
+        geo = N.new("ShaderNodeNewGeometry")
+        pos = N.new("ShaderNodeSeparateXYZ")
+        K.new(geo.outputs["Position"], pos.inputs[0])
+        face_x = N.new("ShaderNodeAttribute")
+        face_x.attribute_name = "ms_face_x"
+        face_y = N.new("ShaderNodeAttribute")
+        face_y.attribute_name = "ms_face_y"
+        base = b.inputs["Base Color"]
+        if base.is_linked:
+            colour = base.links[0].from_socket
+        else:
+            rgb = N.new("ShaderNodeRGB")
+            rgb.outputs[0].default_value = tuple(base.default_value)
+            colour = rgb.outputs[0]
+        bump_h = None
+        for view, path, detail, fr, vis_attr in views:
+            img = bpy.data.images.load(os.path.abspath(path), check_existing=True)
+            img.alpha_mode = "STRAIGHT"
+            det_img = None
+            if detail and os.path.exists(detail):
+                det_img = bpy.data.images.load(os.path.abspath(detail), check_existing=True)
+                det_img.colorspace_settings.name = "Non-Color"
+            if view == "side":
+                cx, cz, L_, H_ = fr
+                u = op("ADD", op("DIVIDE", op("SUBTRACT", pos.outputs["X"], cx), L_), 0.5)
+                v = op("ADD", op("DIVIDE", op("SUBTRACT", pos.outputs["Z"], cz), H_), 0.5)
+                sides = ((u, op("MULTIPLY", face_y.outputs["Fac"], -1.0)),          # the near side, seen from -Y
+                         (op("SUBTRACT", 1.0, u), face_y.outputs["Fac"]))            # the far side: the picture mirrored
+            else:
+                cy, cz, W_, H_ = fr
+                u = op("ADD", op("DIVIDE", op("SUBTRACT", pos.outputs["Y"], cy), W_), 0.5)
+                v = op("ADD", op("DIVIDE", op("SUBTRACT", pos.outputs["Z"], cz), H_), 0.5)
+                sides = ((u, face_x.outputs["Fac"]),)
+            for uu, face_dot in sides:
+                uv = N.new("ShaderNodeCombineXYZ")
+                K.new(uu, uv.inputs[0])
+                K.new(v, uv.inputs[1])
+                tex = N.new("ShaderNodeTexImage")
+                tex.image = img
+                tex.extension = "CLIP"
+                K.new(uv.outputs[0], tex.inputs["Vector"])
+                if view == "front":                # foreshortened and lit from the front: squarely facing faces only, gently
+                    w = op("MULTIPLY", facing(face_dot, 0.6, 0.85), op("MULTIPLY", tex.outputs["Alpha"], strength * 0.7))
+                else:
+                    w = op("MULTIPLY", facing(face_dot), op("MULTIPLY", tex.outputs["Alpha"], strength))
+                if vis_attr:
+                    at = N.new("ShaderNodeAttribute")
+                    at.attribute_name = vis_attr
+                    w = op("MULTIPLY", w, at.outputs["Fac"])
+                mix = N.new("ShaderNodeMix")
+                mix.data_type = "RGBA"
+                mix.clamp_factor = True
+                K.new(w, mix.inputs["Factor"])
+                K.new(colour, mix.inputs["A"])
+                K.new(tex.outputs["Color"], mix.inputs["B"])
+                colour = mix.outputs["Result"]
+                if det_img is not None:
+                    dt = N.new("ShaderNodeTexImage")
+                    dt.image = det_img
+                    dt.extension = "EXTEND"
+                    K.new(uv.outputs[0], dt.inputs["Vector"])
+                    term = op("MULTIPLY", op("SUBTRACT", dt.outputs["Color"], 0.5), w)
+                    bump_h = term if bump_h is None else op("ADD", bump_h, term)
+        for l in list(base.links):
+            K.remove(l)
+        K.new(colour, base)
+        if bump_h is not None and not b.inputs["Normal"].is_linked:
+            bump = N.new("ShaderNodeBump")
+            bump.inputs["Strength"].default_value = 0.35
+            bump.inputs["Distance"].default_value = 0.0006
+            K.new(bump_h, bump.inputs["Height"])
+            K.new(bump.outputs["Normal"], b.inputs["Normal"])
+        done.append(m.name)
+    return {"views": [v[0] for v in views], "materials": len(done)}
+
+
+if args.get("projection"):
+    proj = dict(args["projection"])
+    lo_all = Vector((min(blib.dims(o)[0].x for o, _r in parts), min(blib.dims(o)[0].y for o, _r in parts), min(blib.dims(o)[0].z for o, _r in parts)))
+    hi_all = Vector((max(blib.dims(o)[1].x for o, _r in parts), max(blib.dims(o)[1].y for o, _r in parts), max(blib.dims(o)[1].z for o, _r in parts)))
+    # the plan pictures are cropped to the whole object's silhouette: its box is their frame
+    proj["asset_frame"] = [(lo_all.x + hi_all.x) / 2, (lo_all.z + hi_all.z) / 2, hi_all.x - lo_all.x, hi_all.z - lo_all.z]
+    proj["asset_frame_front"] = [(lo_all.y + hi_all.y) / 2, (lo_all.z + hi_all.z) / 2, hi_all.y - lo_all.y, hi_all.z - lo_all.z]
+    eps = max((hi_all - lo_all).length * 0.0008, 0.0002)
+    all_objs = [o for o, _r in parts]
+    front_line = lo_all.x + 0.55 * (hi_all.x - lo_all.x)     # the front picture: parts that sit wholly in the front 45%
+    for o, r in parts:
+        spec = next((p for p in args["parts"] if p["name"] == r["name"]), {})
+        if (spec.get("material") or {}).get("glass"):
+            continue
+        # a long part reaching into the front zone (the bullpup receiver runs to 61% of the length under the
+        # handguard) got the front picture on its hidden front faces in patches (2026-09-28): its REAR end decides
+        spec["front_part"] = blib.dims(o)[0].x > front_line
+        facing_attributes(o)
+        if proj.get("front") and spec["front_part"]:
+            vis = face_visibility(o, all_objs, (1.0, 0.0, 0.0), eps)
+            attr = o.data.attributes.get("ms_vis_front") or o.data.attributes.new("ms_vis_front", "FLOAT", "FACE")
+            attr.data.foreach_set("value", vis.astype(np.float32))
+        if not spec.get("projection") and proj.get("side"):
+            vis = face_visibility(o, all_objs, (0.0, -1.0, 0.0), eps)
+            attr = o.data.attributes.get("ms_vis_side") or o.data.attributes.new("ms_vis_side", "FLOAT", "FACE")
+            attr.data.foreach_set("value", vis.astype(np.float32))
+        r["projection"] = project_pictures(o, spec, proj)
+    log("pictures projected: " + ", ".join("%s (%s)" % (r["name"], "+".join(r["projection"].get("views", []))) for _o, r in parts if r.get("projection")))
 
 # the bake source keeps every part at full detail: decimating first and baking from the decimated mesh threw away all
 # of a seed's fine detail (the free pistol's 280k-face TRELLIS body came out melted at 40k with nothing to bake back,
