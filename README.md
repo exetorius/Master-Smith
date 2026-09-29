@@ -91,6 +91,13 @@ tests/                     pure tests; Blender tests behind MASTERSMITH_BLENDER_
 picture models when `MASTERSMITH_PAID_PICTURES=1`. The tools print what a step cost; the agent says the estimate
 before a step that spends.
 
+## Community
+
+Master Smith is discussed in the **#master-smith** channel of the VibeUE Discord: join at
+[discord.gg/hZs73ST59a](https://discord.gg/hZs73ST59a), then open
+[#master-smith](https://discord.com/channels/1420185370943029271/1552465698733957150). Builds, results, questions and
+ideas go there; bugs go to [GitHub issues](https://github.com/kevinpbuckley/Master-Smith/issues).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

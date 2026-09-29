@@ -21,6 +21,11 @@ There is no service: a coding agent (Claude Code, Codex, ...) runs in the repo r
 `python -m mastersmith.ms`. Read `AGENTS.md` and `.claude/skills/forge/SKILL.md` before changing the tools; the
 rules there were learned on real builds and the dated notes in the code say why.
 
+## Where to talk
+
+The **#master-smith** channel of the [VibeUE Discord](https://discord.gg/hZs73ST59a) is where results, questions and
+ideas go; bugs go to GitHub issues.
+
 ## Branches
 
 `master` is what people run; `dev` is where work lands. Open pull requests against `dev`.
