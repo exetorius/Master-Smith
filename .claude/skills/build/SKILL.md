@@ -53,6 +53,10 @@ renders next to `side.png`; edit and build again until the shape and the orienta
 for a code part, but `part-pictures` for it is still worth the $0.16 when the shape is not obvious from the plan.
 When the part picture and common sense disagree (a barrel drawn thick at the muzzle, an AR T-handle for a bullpup's
 side slot, eleven fine teeth on a 68 mm rail), common sense and the reference picture win; say so in the review.
+A code part's box is its TIGHT silhouette read off the grid: the assembler stretches a build to fill its box on
+every axis (up to 2x), so a 41 mm box around a 13 mm trigger blade turned it into a wedge (2026-09-28). A vendor
+seed with a hollow the picture invented (the Tripo receiver's open bolt trough) is filled by the code part that sits
+on it: deepen that part's box and give the builder a keel (the bullpup's TopRail).
 
 ## 5a. Part review gate: every part passes before anything is assembled
 Nothing goes to `assemble` until every part has been judged AGAINST ITS PICTURE, not as a shape alone (2026-09-28:
