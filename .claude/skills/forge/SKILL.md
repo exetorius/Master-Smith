@@ -63,7 +63,10 @@ Nothing goes to `assemble` until every part has been judged AGAINST ITS PICTURE,
 a magazine built as a straight box went unnoticed until the owner asked for the comparison). For each part, Read
 its `side.png` (and `quarter.png`) beside its render (`<Part>_side.png` and `<Part>_iso.png` for a code part,
 `seed_render.png` for a meshed one) and give the owner one table: part, pass/fail, what differs. Fail means fix at
-that part's step (edit build.py, re-register, redraw and re-mesh) and review again. Tell the owner the table, with
+that part's step (edit build.py, re-register, redraw and re-mesh) and review again. A meshed seed often carries
+a feature the plan also codes (the Tripo handguard came with its own side rail, the receiver with a charging
+handle): when the seed already has it, DROP the code part from the plan rather than fit both (a duplicate rail
+stood 6 mm off the handguard, owner 2026-09-29). Tell the owner the table, with
 the failures and their fixes, before step 6.
 
 ## 5. Mesh and register (free with TRELLIS)
