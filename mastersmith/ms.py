@@ -632,10 +632,13 @@ def write_preview(job):
     rep = json.load(open(os.path.join(delivery, "report.json")))
     name = job.spec.name
     lods = [g for g in sorted(glob.glob(os.path.join(delivery, "SM_%s*.glb" % name)))]
-    lod_buttons = "".join("<button onclick=\"lod('%s')\">%s</button>" % (os.path.basename(g), os.path.basename(g)[len("SM_%s" % name):-4].strip("_") or "LOD0")
+    # every file link carries its mtime: a tab left open on an earlier preview kept showing the old GLB after a
+    # re-assemble, and the owner reviewed a fix that was not on screen (2026-09-29)
+    lod_buttons = "".join("<button onclick=\"lod('%s')\">%s</button>" % (os.path.basename(g) + "?v=%d" % int(os.path.getmtime(g)),
+                                                                          os.path.basename(g)[len("SM_%s" % name):-4].strip("_") or "LOD0")
                           for g in lods)
     rel = lambda path: os.path.relpath(path, delivery).replace(os.sep, "/")
-    imgs = lambda paths: "".join('<a href="%s"><img src="%s" title="%s"></a>' % (rel(p), rel(p), os.path.basename(p)) for p in paths if os.path.exists(p))
+    imgs = lambda paths: "".join('<a href="%s"><img src="%s" title="%s"></a>' % (rel(p), rel(p) + "?v=%d" % int(os.path.getmtime(p)), os.path.basename(p)) for p in paths if os.path.exists(p))
     previews = [os.path.join(delivery, r) for r in (rep.get("renders") or []) + (rep.get("detail_renders") or [])]
     refs = sorted(glob.glob(job.path("ref", "*.png"))) + [job.path("plan", "side_grid.png"), job.path("plan", "front_grid.png")]
     rows = []
@@ -652,8 +655,8 @@ def write_preview(job):
     html = PREVIEW_HTML % {
         "name": name, "desc": job.spec.description, "dims": " x ".join("%.3f" % v for v in rep.get("dimensions_m") or []),
         "tris": format((rep.get("lods") or [{}])[0].get("triangles", 0), ","), "nparts": len(plan["parts"]), "engine": job.spec.engine,
-        "glb": os.path.basename(lods[0]) if lods else "", "lods": lod_buttons,
-        "sheet": '<a href="preview_views.png"><img class="sheet" src="preview_views.png"></a>' if os.path.exists(sheet) else "<small>not rendered</small>",
+        "glb": (os.path.basename(lods[0]) + "?v=%d" % int(os.path.getmtime(lods[0]))) if lods else "", "lods": lod_buttons,
+        "sheet": '<a href="preview_views.png"><img class="sheet" src="preview_views.png?v=%d"></a>' % int(os.path.getmtime(sheet)) if os.path.exists(sheet) else "<small>not rendered</small>",
         "previews": imgs(previews), "refs": imgs(refs), "parts": "".join(rows)}
     out = os.path.join(delivery, "preview.html")
     open(out, "w", encoding="utf-8").write(html)
