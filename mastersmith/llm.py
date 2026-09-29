@@ -36,17 +36,17 @@ class LLM:
 
         Reasoning models spend their thinking INSIDE max_tokens: Gemini 3.8 Flash used 477 of a 500-token
         budget on reasoning and cut the JSON answer off mid-word (2026-09-16). Effort is pinned low - the
-        director fills a form and the checker answers yes/no questions - and JSON answers are requested as such."""
+        planner fills a form and the checker answers yes/no questions - and JSON answers are requested as such."""
         if config.LLM_BACKEND != "openrouter":
             from . import llm_cli
             try:
-                msg, rec = llm_cli.chat(messages, model or config.DIRECTOR_MODEL, tools=tools, json_only=json_only,
+                msg, rec = llm_cli.chat(messages, model or config.LLM_MODEL, tools=tools, json_only=json_only,
                                         effort=effort, log=self.log)
             except llm_cli.CLIError as exc:
                 raise LLMError(str(exc))
             self.calls.append({**rec, "stage": self.stage})
             return msg
-        body = {"model": model or config.DIRECTOR_MODEL, "messages": messages, "max_tokens": max_tokens,
+        body = {"model": model or config.LLM_MODEL, "messages": messages, "max_tokens": max_tokens,
                 "temperature": temperature, "usage": {"include": True}, "reasoning": {"effort": effort}}
         if json_only:
             body["response_format"] = {"type": "json_object"}

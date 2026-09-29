@@ -8,7 +8,7 @@ PROMPT = """You are reviewing a finished game asset. Judge what the delivered re
 Brief: {brief}
 Images in order: {images}
 The brief says where the reference came from. When it is the customer's own photograph, judge colours and materials
-against the PHOTOGRAPH: the caption is the director's wording of it and can be wrong about a part's colour (a grey
+against the PHOTOGRAPH: the caption is the brief's wording of it and can be wrong about a part's colour (a grey
 magazine described as black is not a defect of the model).
 When a SOURCE SEED preview is supplied, compare it with the finished model. If the source looks clean but the finish
 has triangle/faceted patterns, report a finishing regression. Lighting/view may differ.

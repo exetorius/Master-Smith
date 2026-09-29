@@ -3,7 +3,7 @@
 
 Each call is one headless run in a fresh temporary folder. The OpenAI-style messages become one transcript; pictures
 become files (Claude Code reads them with its Read tool, Codex gets them attached with -i). Tool calling, which the
-director's chat needs, is asked for as a JSON reply and turned back into OpenAI tool_calls. Nothing is billed here:
+old chat director needed, is asked for as a JSON reply and turned back into OpenAI tool_calls. Nothing is billed here:
 every call is recorded at $0."""
 import base64
 import json
@@ -38,7 +38,7 @@ def claude_model(model):
     for alias in ("opus", "sonnet", "haiku"):
         if alias in m:
             return alias
-    return config.CLAUDE_CODE_DEFAULT       # Gemini / GPT ids (director, checks, review) -> a Claude model
+    return config.CLAUDE_CODE_DEFAULT       # Gemini / GPT ids (checks, review) -> a Claude model
 
 
 def _effort(effort):

@@ -1,5 +1,5 @@
 ---
-name: build
+name: forge
 description: Build a game-ready hard-surface asset (weapon, vehicle, aircraft, prop) as an assembly of parts from this Claude Code session with the ms tools - reference pictures, gridded plan, per-part pictures, TRELLIS meshes, registration, assembly, six-view review, package. Use when the owner asks to build, rebuild, fix or re-mesh a model.
 ---
 

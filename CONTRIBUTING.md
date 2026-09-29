@@ -18,7 +18,7 @@ that matter most. Thank you for them.
 ## How it is worked
 
 There is no service: a coding agent (Claude Code, Codex, ...) runs in the repo root, reads `AGENTS.md` and drives
-`python -m mastersmith.ms`. Read `AGENTS.md` and `.claude/skills/build/SKILL.md` before changing the tools; the
+`python -m mastersmith.ms`. Read `AGENTS.md` and `.claude/skills/forge/SKILL.md` before changing the tools; the
 rules there were learned on real builds and the dated notes in the code say why.
 
 ## Branches

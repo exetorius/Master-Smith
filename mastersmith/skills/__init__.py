@@ -1,5 +1,5 @@
 """Skills are Markdown files with a small YAML-ish front matter the pipeline reads (reference view,
-seed knobs, finishing defaults) and a body the director and the picture stage read as guidance."""
+seed knobs, finishing defaults) and a body the agent and the picture stage read as guidance."""
 import json
 import re
 from pathlib import Path

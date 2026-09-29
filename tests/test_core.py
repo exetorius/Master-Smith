@@ -209,7 +209,7 @@ def test_reference_estimates_split_the_picture_stage():
     assert 0 < pics["usd"] < full["usd"] and 0 < rest["usd"] < full["usd"]
     assert any(n.startswith("extra views") for n, _ in pics["steps"]) and not any(n.startswith("3D seed") for n, _ in pics["steps"])
     assert any(n.startswith("3D seed") for n, _ in rest["steps"]) and not any(n.startswith("concept picture") for n, _ in rest["steps"])
-    assert abs(pics["usd"] + rest["usd"] - full["usd"] - 2 * pricing.LLM_CALL_ALLOWANCE_USD) < 1e-6   # overhead counted in both
+    assert abs(pics["usd"] + rest["usd"] - full["usd"]) < 1e-6      # the two halves are the whole: no chat overhead since the director went
 
 
 def test_estimate_prices_the_chosen_mesh_vendor():

@@ -28,11 +28,11 @@ cd Master-Smith
 python -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env                                  # put FAL_KEY in it
-claude                                                # or codex; then: /build a modern bullpup carbine, 0.68 m
+claude                                                # or codex; then: /forge a modern bullpup carbine, 0.68 m
 ```
 
 The agent reads [AGENTS.md](AGENTS.md) (the rules, the costs, the plan format) and follows the recipe in
-[.claude/skills/build/SKILL.md](.claude/skills/build/SKILL.md): it draws the reference pictures and shows them to
+[.claude/skills/forge/SKILL.md](.claude/skills/forge/SKILL.md): it draws the reference pictures and shows them to
 you, writes the parts plan from the gridded views, draws and meshes each part, looks at every seed, assembles, and
 reads the six-view sheet before it calls anything good. You can interrupt at any step; nothing runs unattended.
 
@@ -64,7 +64,7 @@ the previews and the six orthographic views the review is judged on.
 
 ```
 AGENTS.md                  the rules any coding agent follows here; CLAUDE.md imports it
-.claude/skills/build/      the build recipe (/build in Claude Code)
+.claude/skills/forge/      the build recipe (/forge in Claude Code)
 mastersmith/ms.py          the tools: new, picture, view, grid, plan, part-pictures, mesh, register, fit, brush, sdf, assemble, sheet, preview, package, status
 mastersmith/sculpt.py      headless sculpting in numpy: brushes (inflate, move, smooth, flatten, crease) and silhouette fitting
 mastersmith/sdfkit.py      exact parts as signed distance functions (primitives, CSG, smooth blends, repeat) meshed by marching cubes

@@ -1,4 +1,4 @@
-"""The brief the director fills in from the chat. Everything the pipeline needs, nothing it does not."""
+"""The brief (out/<Name>/brief.json, written by `ms new`). Everything the pipeline needs, nothing it does not."""
 from dataclasses import dataclass, field, asdict
 
 CATEGORIES = ("weapon", "vehicle", "aircraft", "helicopter", "character", "prop", "environment")

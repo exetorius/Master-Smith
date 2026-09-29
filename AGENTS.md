@@ -9,7 +9,7 @@ container, no OpenRouter: the service, the chat app and the one-seed finish were
 history before commit "Delete the service" has them).
 
 Run everything from this folder with the venv: `.venv/Scripts/python.exe -m mastersmith.ms <command>`.
-The step-by-step recipe is `.claude/skills/build/SKILL.md` (Claude Code invokes it as `/build`; any other agent
+The step-by-step recipe is `.claude/skills/forge/SKILL.md` (Claude Code invokes it as `/forge`; any other agent
 reads the file). Read it before a build. Agent-specific notes live in that agent's own file (`CLAUDE.md`, ...).
 
 ## Where things live

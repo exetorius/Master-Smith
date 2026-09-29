@@ -31,8 +31,8 @@ BLENDER_BIN = os.environ.get("BLENDER_BIN", r"C:\Program Files\Blender Foundatio
 # Scripts" preference says - customers hand us .blend files.
 BLENDER_FLAGS = ["-b", "-Y"]
 
-# --- LLMs (OpenRouter ids). The director runs the chat and decides; it is cheap on purpose.
-# Who answers the model calls (director, plan, part code, checks, review): "openrouter" (pay per call), or a coding
+# --- the few model calls the helpers still make (the three-quarter picture check, the old planner/review paths).
+# Who answers them: "openrouter" (pay per call), or a coding
 # agent on this PC on the owner's own subscription: "claude-code" (`claude -p`) or "codex" (`codex exec`).
 LLM_BACKEND = os.environ.get("MASTERSMITH_LLM", "openrouter").strip().lower()
 CLAUDE_CODE_MODEL = os.environ.get("MASTERSMITH_CLAUDE_MODEL", "")          # forces one alias for every call
@@ -51,7 +51,9 @@ BODY_SEED_VIEW = os.environ.get("MASTERSMITH_BODY_SEED_VIEW", "").strip().lower(
 # Every part of an assembly from the mesher, none modelled in Blender code (owner, 2026-09-28: "I don't want to
 # sculpt any parts with Blender, try fully sculpting with TRELLIS"). "0" brings the code parts back.
 ALL_VENDOR = os.environ.get("MASTERSMITH_ALL_VENDOR", "1") == "1"
-DIRECTOR_MODEL = os.environ.get("MASTERSMITH_DIRECTOR_MODEL", "google/gemini-3.8-flash")
+# the default model for those calls (the old name MASTERSMITH_DIRECTOR_MODEL still works; there is no director since
+# 2026-09-28, the coding agent in the repo root is the director)
+LLM_MODEL = os.environ.get("MASTERSMITH_LLM_MODEL") or os.environ.get("MASTERSMITH_DIRECTOR_MODEL", "google/gemini-3.8-flash")
 VISION_MODEL = os.environ.get("MASTERSMITH_VISION_MODEL", "google/gemini-3.8-flash")
 # Assembly builds (docs/ASSEMBLY.md): the builder plans the parts, writes the code parts and checks the assembly.
 BUILDER_MODEL = os.environ.get("MASTERSMITH_BUILDER_MODEL", "anthropic/claude-opus-5.5")

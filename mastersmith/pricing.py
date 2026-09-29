@@ -126,7 +126,7 @@ def price(model, payload=None):
     return round(usd, 4)
 
 
-# A generous per-call allowance for the director/vision LLM; settled to the real usage.cost after.
+# A generous per-call allowance for a vision LLM call; settled to the real usage.cost after.
 FREE_LLM = config.LLM_BACKEND != "openrouter"   # Claude Code / Codex on the owner's subscription: $0 a call
 LLM_CALL_ALLOWANCE_USD = 0.0 if FREE_LLM else 0.03
 
@@ -202,7 +202,6 @@ def estimate(spec):
         steps = [s for s in _estimate_steps(spec) if s[0].startswith(REFERENCE_STEPS)]
         steps += estimate_assembly(spec)
         steps.append(("review the result against the picture (vision)", LLM_CALL_ALLOWANCE_USD))
-        steps.append(("director chat overhead", 2 * LLM_CALL_ALLOWANCE_USD))
         total = round(sum(u for _, u in steps), 4)
         return {"steps": steps, "usd": total, "credits": config.credits_for_usd(total), "build_mode": "assembly"}
     steps = _estimate_steps(spec)
@@ -245,7 +244,6 @@ def _estimate_steps(spec):
         steps.append(("humanoid auto-rig with walk/run (Meshy)", price("fal-ai/meshy/rigging")))
     steps.append(("Blender finish: decimate, orient, scale, LODs, collision, maps, FBX/GLB", 0.0))
     steps.append(("review the result against the picture (vision)", LLM_CALL_ALLOWANCE_USD))
-    steps.append(("director chat overhead", 2 * LLM_CALL_ALLOWANCE_USD))
     return steps
 
 
@@ -260,7 +258,7 @@ REFERENCE_STEPS = PICTURE_STEPS + ("extra views for multiview seeding",)
 def estimate_reference(spec):
     """Worst case of the picture stage alone: the reference picture(s) the customer approves before a mesh is bought."""
     est = estimate(spec)
-    steps = [(n, u) for n, u in est["steps"] if n.startswith(REFERENCE_STEPS) or n == "director chat overhead"]
+    steps = [(n, u) for n, u in est["steps"] if n.startswith(REFERENCE_STEPS)]
     usd = sum(u for _, u in steps)
     return {"steps": steps, "usd": round(usd, 4), "credits": config.credits_for_usd(usd)}
 

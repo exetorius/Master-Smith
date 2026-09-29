@@ -1,2 +1,2 @@
-"""Master Smith: prompt in, game-ready 3D model out. fal.ai for pictures and meshes, OpenRouter for the director,
-Blender for the finishing, a credit wallet so nobody spends what they do not have."""
+"""Master Smith: game-ready hard-surface assets built as assemblies of parts, worked by a coding agent in the repo
+root with the ms tools (mastersmith/ms.py): fal.ai pictures, TRELLIS meshes, headless Blender for everything else."""
