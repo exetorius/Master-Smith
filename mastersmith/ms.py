@@ -22,6 +22,7 @@ deterministic thing and writes into a job folder under out/<Name>/:
     python -m mastersmith.ms sdf out/BullpupCarbine Barrel [sdf.py]                 (an exact part from a distance function)
     python -m mastersmith.ms assemble out/BullpupCarbine [--parts A,B] [--no-sharpen]
     python -m mastersmith.ms sheet path/to/any.glb [--out sheet.png]
+    python -m mastersmith.ms refs out/BullpupCarbine out/Other [--no-open]  (reference pictures to approve, ref/review.json)
     python -m mastersmith.ms preview out/BullpupCarbine [--no-open]   (delivery/preview.html served and opened)
     python -m mastersmith.ms package out/BullpupCarbine
     python -m mastersmith.ms status out/BullpupCarbine
@@ -38,7 +39,7 @@ import webbrowser
 
 from PIL import Image, ImageOps
 
-from . import config, pricing
+from . import config, pricing, refs_review
 from .fal import Fal, first_url
 from .images import Images
 from .spec import Spec
@@ -681,6 +682,28 @@ def cmd_preview(a):
         webbrowser.open(url)
 
 
+def cmd_refs(a):
+    """Several jobs' reference pictures on one local page with Approve / Redraw and a note per picture, kept in each
+    job's ref/review.json (2026-09-29: the owner approves a batch of references in one sitting)."""
+    out_dir = str(config.OUT_DIR)
+    jobs = [os.path.basename(os.path.normpath(j)) for j in a.jobs] or refs_review.all_jobs(out_dir)
+    for j in jobs:
+        if not os.path.isfile(os.path.join(out_dir, j, "brief.json")):
+            sys.exit("no job %s in %s" % (j, out_dir))
+    page = refs_review.write_page(out_dir, jobs)
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+    subprocess.Popen([sys.executable, "-m", "mastersmith.refs_review", out_dir, str(port)], cwd=str(config.ROOT),
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+    url = "http://127.0.0.1:%d/refs.html" % port
+    print("reference review: %s  (%s, %d jobs)" % (url, page, len(jobs)))
+    print("choices land in out/<Name>/ref/review.json; read them before building")
+    if not a.no_open:
+        webbrowser.open(url)
+
+
 def cmd_sheet(a):
     class J:
         pass
@@ -709,6 +732,10 @@ def cmd_status(a):
     job = Job(a.job)
     print("brief:", job.spec.name, job.spec.category, "%.3f m" % job.spec.size_m)
     print("ref:", sorted(os.listdir(job.path("ref"))) if os.path.isdir(job.path("ref")) else "none")
+    review = refs_review.load_review(job.dir)
+    if review:
+        print("ref review (ms refs):", ", ".join("%s %s%s" % (f, r["status"], (": " + r["note"]) if r.get("note") else "")
+                                                 for f, r in sorted(review.items())))
     have = [f for f in existing_pictures(job.dir) if f.startswith("parts")]
     if have:
         print("part pictures/builders on disk (%d): reuse them; ask the owner before drawing any again" % len(have))
@@ -764,6 +791,7 @@ def main(argv=None):
     s.add_argument("--no-projection", action="store_true", help="skip the picture projection (#14), for comparison")
     s.add_argument("--no-materials", action="store_true", help="skip the CC0 smart-material pass (#15), for comparison"); s.set_defaults(fn=cmd_assemble)
     s = sub.add_parser("sheet"); s.add_argument("glb"); s.add_argument("--out"); s.set_defaults(fn=cmd_sheet)
+    s = sub.add_parser("refs"); s.add_argument("jobs", nargs="*"); s.add_argument("--no-open", action="store_true"); s.set_defaults(fn=cmd_refs)
     s = sub.add_parser("preview"); s.add_argument("job"); s.add_argument("--no-open", action="store_true"); s.set_defaults(fn=cmd_preview)
     s = sub.add_parser("package"); s.add_argument("job"); s.set_defaults(fn=cmd_package)
     s = sub.add_parser("status"); s.add_argument("job"); s.set_defaults(fn=cmd_status)

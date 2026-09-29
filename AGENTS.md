@@ -113,6 +113,7 @@ surface detail onto it (for a part whose coded shape is not the drawn one: foldi
 | `sdf <job> <Part> [sdf.py]` | an exact part from `parts/<Part>/sdf.py` (`def part(kit, L, W, H)`, the kit in `mastersmith/sdfkit.py`): marching cubes in the part's box, imported as `registered.blend` with the planned material |
 | `assemble <job> [--parts A,B] [--no-sharpen]` | fits, tints, bakes, LODs, previews, six views |
 | `sheet <file.glb>` | six views of any GLB |
+| `refs [<job> ...] [--no-open]` | serves the reference pictures of the listed jobs (all jobs when none) on one local page with Approve / Redraw and a note per picture; the owner's choices land in `ref/review.json` (`ms status` prints them). Drafts moved to `ref/unused/` are not shown; `ref/notes.txt` is shown above a job's pictures |
 | `preview <job> [--no-open]` | serves `delivery/preview.html` (3D viewer, six views, every part's pictures beside its seed) and opens it |
 | `package <job>` | README, manifest, zip in delivery/ |
 | `status <job>` | what the job has so far |

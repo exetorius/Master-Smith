@@ -26,8 +26,10 @@ Sizes: a rifle 0.65-1.0 m, a pistol 0.2 m, a truck 5-6 m, a gunship 12-18 m. `--
   one; `--model nano-pro` for the hero). Describe the design fully: era, materials, colours, every feature.
 - Standard views from it: `$PY view out/<Name> --which side --from ref/ref_0.png` (forward end must point RIGHT;
   `--mirror` if it came out the other way) and `--which front`. Vehicles/aircraft also `--which back`, `--which top`.
-- Read each picture. Redraw with `--fixes "..."` when the design drifted. Show the owner the paths and WAIT for
-  approval unless told to skip it.
+- Read each picture. Redraw with `--fixes "..."` when the design drifted; move a draft you replaced into `ref/unused/`
+  (never delete it). Write one line per job in `ref/notes.txt` (what to look at), then `$PY refs out/<Name> [more jobs]`
+  serves every picture with Approve / Redraw on one local page: give the owner the URL and WAIT for approval unless
+  told to skip it. Their choices are in `ref/review.json` (`$PY status out/<Name>`); a Redraw's note is the `--fixes`.
 
 ## 3. Grid and plan
 - `$PY grid out/<Name> --side ref/ref_side.png --front ref/ref_front.png` -> `plan/side_grid.png`,
